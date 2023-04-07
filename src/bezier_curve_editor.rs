@@ -26,7 +26,7 @@ impl Default for BezierCurveEditor {
                 pos2(50.0, 50.0),
                 pos2(60.0, 250.0),
                 pos2(200.0, 200.0),
-                pos2(250.0, 50.0),
+                pos2(250.0, 150.0),
             ],
             stroke: Stroke::new(1.0, Color32::from_rgb(25, 200, 100)),
             fill: Color32::from_rgb(50, 100, 150).linear_multiply(0.25),
@@ -92,7 +92,7 @@ impl BezierCurveEditor {
             let points_in_screen: Vec<Pos2> = self.control_points.iter().map(|p| to_screen * *p).collect();
 
             let points = points_in_screen.clone().try_into().unwrap();
-            let shape = CubicBezierShape::from_points_stroke(points, true, self.fill, self.stroke);
+            let shape = CubicBezierShape::from_points_stroke(points, false, self.fill, self.stroke);
             painter.add(epaint::RectShape::stroke(
                 shape.visual_bounding_rect(),
                 0.0,
@@ -111,10 +111,14 @@ impl BezierCurveEditor {
             let control_point_radius = 8.0;
 
             let mut new_pts = [
-                pos2(200.0, 200.0),
+                // pos2(50.0, 50.0),
+                // pos2(60.0, 250.0),
+                // pos2(200.0, 200.0),
+                // pos2(250.0, 50.0),
+                pos2(250.0, 150.0),
                 pos2(250.0, 50.0),
-                pos2(150.0 + 50.0, 150.0 + 50.0),
-                pos2(150.0 + 60.0, 50.0),
+                pos2(350.0, 200.0),
+                pos2(350.0, 50.0),
             ];
 
             let control_point_shapes: Vec<Shape> = new_pts
@@ -125,7 +129,7 @@ impl BezierCurveEditor {
 
                     let point_in_screen = to_screen.transform_pos(*point);
                     let point_rect = Rect::from_center_size(point_in_screen, size);
-                    let point_id = response.id.with(i * 20);
+                    let point_id = response.id.with(i + 4);
                     let point_response = ui.interact(point_rect, point_id, Sense::drag());
 
                     *point += point_response.drag_delta();
@@ -167,8 +171,8 @@ impl super::Demo for BezierCurveEditor {
         Window::new(self.name())
             .open(open)
             .vscroll(false)
-            .resizable(false)
-            .default_size([300.0, 350.0])
+            .resizable(true)
+            .default_size([300.0, 550.0])
             .show(ctx, |ui| self.ui(ui));
     }
 }
