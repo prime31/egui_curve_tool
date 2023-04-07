@@ -189,6 +189,7 @@ impl eframe::App for TemplateApp {
             ));
             egui::warn_if_debug_build(ui);
 
+            #[cfg(not(target_arch = "wasm32"))]
             if ui.button("Open file…").clicked() {
                 if let Some(path) = rfd::FileDialog::new().pick_file() {
                     self.picked_path = Some(path.display().to_string());
