@@ -150,6 +150,7 @@ impl eframe::App for TemplateApp {
                 self.show_toast("fuck you", 3);
             }
 
+            #[cfg(not(target_arch = "wasm32"))]
             ui.label(format!(
                 "Repainting the UI each frame. FPS: {:?}",
                 SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()
