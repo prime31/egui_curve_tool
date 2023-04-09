@@ -1,11 +1,12 @@
+use std::default;
 use std::f64::consts::TAU;
 use std::ops::RangeInclusive;
 
-use egui::plot::{GridInput, GridMark};
+use egui::plot::{CoordinatesFormatter, GridInput, GridMark, PlotBounds, PlotUi};
 use egui::*;
 use plot::{
-    Arrows, Bar, BarChart, BoxElem, BoxPlot, BoxSpread, CoordinatesFormatter, Corner, HLine, Legend, Line, LineStyle,
-    MarkerShape, Plot, PlotImage, PlotPoint, PlotPoints, Points, Polygon, Text, VLine,
+    Arrows, Bar, BarChart, BoxElem, BoxPlot, BoxSpread, Corner, HLine, Legend, Line, LineStyle, MarkerShape, Plot,
+    PlotImage, PlotPoint, PlotPoints, Points, Polygon, Text, VLine,
 };
 
 // ----------------------------------------------------------------------------
@@ -127,29 +128,61 @@ fn is_approx_integer(val: f64) -> bool {
 
 // ----------------------------------------------------------------------------
 
+#[derive(Default, PartialEq)]
+enum AnimationKeyInterpolation {
+    #[default]
+    None,
+    Step,
+}
+
+#[derive(Default, PartialEq)]
+struct AnimationKey {
+    pos: Vec2,
+    tangent_in: Vec2,
+    tangent_out: Vec2,
+    interopolation: AnimationKeyInterpolation,
+    tangent_locked: bool,
+}
+
+impl AnimationKey {
+    fn new(pos: Vec2) -> AnimationKey {
+        AnimationKey {
+            pos,
+            tangent_in: Vec2::new(-0.01, 0.0),
+            tangent_out: Vec2::new(0.01, 0.0),
+            ..Default::default()
+        }
+    }
+}
+
 #[derive(PartialEq)]
 struct LineDemo {
-    animate: bool,
     time: f64,
     circle_radius: f64,
+    plot_scale: f64,
     circle_center: Pos2,
-    square: bool,
-    proportional: bool,
-    coordinates: bool,
     line_style: LineStyle,
+    dragging_my_circle: bool,
+    my_circle_pos: Pos2,
+    interact_pos: Option<Pos2>,
+    points: Vec<AnimationKey>,
 }
 
 impl Default for LineDemo {
     fn default() -> Self {
         Self {
-            animate: !cfg!(debug_assertions),
             time: 0.0,
-            circle_radius: 1.5,
+            circle_radius: 0.001,
+            plot_scale: 0.005,
             circle_center: Pos2::new(0.0, 0.0),
-            square: false,
-            proportional: true,
-            coordinates: true,
             line_style: LineStyle::Solid,
+            dragging_my_circle: false,
+            my_circle_pos: Pos2::new(0.3, 0.3),
+            interact_pos: None,
+            points: vec![
+                AnimationKey::new(Vec2::new(0.0, 0.0)),
+                AnimationKey::new(Vec2::new(1.0, 1.0)),
+            ],
         }
     }
 }
@@ -157,14 +190,10 @@ impl Default for LineDemo {
 impl LineDemo {
     fn options_ui(&mut self, ui: &mut Ui) {
         let Self {
-            animate,
             time: _,
             circle_radius,
             circle_center,
-            square,
-            proportional,
             line_style,
-            coordinates,
             ..
         } = self;
 
@@ -187,13 +216,6 @@ impl LineDemo {
 
             ui.vertical(|ui| {
                 ui.style_mut().wrap = Some(false);
-                ui.checkbox(animate, "Animate");
-                ui.checkbox(square, "Square view")
-                    .on_hover_text("Always keep the viewport square.");
-                ui.checkbox(proportional, "Proportional data axes")
-                    .on_hover_text("Tick are the same size on both axes.");
-                ui.checkbox(coordinates, "Show coordinates")
-                    .on_hover_text("Can take a custom formatting function.");
 
                 ComboBox::from_label("Line style")
                     .selected_text(line_style.to_string())
@@ -212,26 +234,45 @@ impl LineDemo {
         });
     }
 
-    fn circle(&self) -> Line {
-        let n = 512;
+    fn draw(&self, key: &AnimationKey, plot_ui: &mut PlotUi) {
+        plot_ui.line(self.circle(key.pos, self.circle_radius));
+        plot_ui.line(self.circle(key.pos + key.tangent_in, self.plot_scale * 3.0));
+        plot_ui.line(self.circle(key.pos + key.tangent_out, self.plot_scale * 3.0));
+    }
+
+    fn circle(&self, pos: Vec2, radius: f64) -> Line {
+        let n = 15;
+        let circle_points: PlotPoints = (0..=n)
+            .map(|i| {
+                let t = remap(i as f64, 0.0..=(n as f64), 0.0..=TAU);
+                [radius * t.cos() + pos.x as f64, radius * t.sin() + pos.y as f64]
+            })
+            .collect();
+        Line::new(circle_points)
+            .color(Color32::from_rgb(100, 200, 100))
+            .style(LineStyle::Solid)
+    }
+
+    fn my_circle(&self) -> Line {
+        let n = 15;
         let circle_points: PlotPoints = (0..=n)
             .map(|i| {
                 let t = remap(i as f64, 0.0..=(n as f64), 0.0..=TAU);
                 let r = self.circle_radius;
                 [
-                    r * t.cos() + self.circle_center.x as f64,
-                    r * t.sin() + self.circle_center.y as f64,
+                    r * t.cos() + self.my_circle_pos.x as f64,
+                    r * t.sin() + self.my_circle_pos.y as f64,
                 ]
             })
             .collect();
         Line::new(circle_points)
             .color(Color32::from_rgb(100, 200, 100))
             .style(self.line_style)
-            .name("circle")
+            .name("my circle")
     }
 
     fn sin(&self) -> Line {
-        let time = self.time;
+        let time = self.time + 0.5;
         Line::new(PlotPoints::from_explicit_callback(
             move |x| 0.5 * (2.0 * x).sin() * time.sin(),
             ..,
@@ -258,26 +299,112 @@ impl LineDemo {
 impl LineDemo {
     fn ui(&mut self, ui: &mut Ui) -> Response {
         self.options_ui(ui);
-        if self.animate {
-            ui.ctx().request_repaint();
-            self.time += ui.input(|i| i.unstable_dt).at_most(1.0 / 30.0) as f64;
-        };
-        let mut plot = Plot::new("lines_demo").legend(Legend::default());
-        if self.square {
-            plot = plot.view_aspect(1.0);
-        }
-        if self.proportional {
-            plot = plot.data_aspect(1.0);
-        }
-        if self.coordinates {
+
+        let mut plot = Plot::new("lines_demo")
+            .allow_drag(!self.dragging_my_circle)
+            .allow_scroll(!self.dragging_my_circle)
+            // .set_margin_fraction(Vec2::new(0.1, 0.1)) // used only with auto
+            // .auto_bounds_x()
+            // .auto_bounds_y()
+            // .include_x(0.0)
+            // .include_y(0.0)
+            .show_x(false)
+            .show_y(false)
+            .data_aspect(1.0)
+            .height(250.0);
+
+        if self.dragging_my_circle {
             plot = plot.coordinates_formatter(Corner::LeftBottom, CoordinatesFormatter::default());
         }
-        plot.show(ui, |plot_ui| {
-            plot_ui.line(self.circle());
-            plot_ui.line(self.sin());
-            plot_ui.line(self.thingy());
-        })
-        .response
+
+        let InnerResponse {
+            mut response,
+            inner: (drag_delta, ptr_coord, bounds),
+        } = plot.show(ui, |plot_ui| {
+            plot_ui.line(self.my_circle());
+
+            for pt in &self.points {
+                self.draw(pt, plot_ui);
+            }
+
+            // clamp x min of the graph
+            let mut min_bounds = plot_ui.plot_bounds().min();
+            if min_bounds[0] < -0.1 {
+                // || min_bounds[1] < -1.1 {
+                min_bounds[0] = min_bounds[0].clamp(-0.1, 100.0);
+                // min_bounds[1] = min_bounds[1].clamp(-1.1, 100.0);
+
+                let mut max_bounds = plot_ui.plot_bounds().max();
+                let bounds = plot_ui.plot_bounds();
+                max_bounds[0] -= bounds.min()[0] - min_bounds[0];
+                // max_bounds[1] -= bounds.min()[1] - min_bounds[1];
+                plot_ui.set_plot_bounds(PlotBounds::from_min_max(min_bounds, max_bounds));
+            }
+
+            plot_ui.ctx().input(|i| {
+                if i.pointer.primary_clicked() {
+                    self.interact_pos = i.pointer.interact_pos()
+                }
+                if i.pointer.primary_released() {
+                    self.interact_pos = None;
+                }
+            });
+            (
+                plot_ui.pointer_coordinate_drag_delta(),
+                plot_ui.pointer_coordinate(),
+                plot_ui.plot_bounds(),
+            )
+        });
+
+        if self.interact_pos.is_some() {
+            if self.my_circle_pos.distance(ptr_coord.unwrap().to_pos2()) < self.circle_radius as f32 {
+                self.dragging_my_circle = true;
+                response = response.on_hover_cursor(CursorIcon::Move);
+            }
+        }
+        if response.drag_released() {
+            self.dragging_my_circle = false;
+        }
+
+        if self.dragging_my_circle {
+            self.my_circle_pos += drag_delta;
+        }
+
+        if let Some(ptr_coord) = ptr_coord {
+            ui.label(format!(
+                "in circle {:?}, dragging circle: {}",
+                self.my_circle_pos.distance(ptr_coord.to_pos2()) < self.circle_radius as f32,
+                self.dragging_my_circle
+            ));
+
+            ui.label(format!(
+                "interact pos {:.2},{:.2}, delta: {:.2},{:.2}, ptr coord: {:.2},{:.2}",
+                self.interact_pos.unwrap_or(Pos2::ZERO).x,
+                self.interact_pos.unwrap_or(Pos2::ZERO).y,
+                drag_delta.x,
+                drag_delta.y,
+                ptr_coord.x,
+                ptr_coord.y
+            ));
+        }
+
+        let largest_range = {
+            let x = bounds.max()[0] - bounds.min()[0];
+            let y = bounds.max()[1] - bounds.min()[1];
+            x.max(y)
+        };
+        self.circle_radius = largest_range * 0.005;
+        self.plot_scale = largest_range / ui.available_size_before_wrap().x as f64;
+
+        ui.label(format!(
+            "plot bounds: min: {:.02?}, max: {:.02?}, largest_range: {:0.2?}, scale: {:0.6?}",
+            bounds.min(),
+            bounds.max(),
+            largest_range,
+            self.plot_scale
+        ));
+
+        response
     }
 }
 

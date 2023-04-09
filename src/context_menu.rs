@@ -90,6 +90,8 @@ impl super::View for ContextMenus {
                     if ui.checkbox(&mut self.allow_drag, "Drag").changed()
                         || ui.checkbox(&mut self.allow_zoom, "Zoom").changed()
                         || ui.checkbox(&mut self.allow_scroll, "Scroll").changed()
+                        || ui.checkbox(&mut self.center_x_axis, "Center x").changed()
+                        || ui.checkbox(&mut self.center_y_axis, "Center y").changed()
                     {
                         ui.close_menu();
                     }
