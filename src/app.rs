@@ -41,7 +41,7 @@ impl Default for TemplateApp {
             Box::new(bezier_curve_editor::BezierCurveEditor::default()),
         ];
         let mut open = BTreeSet::new();
-        open.insert("fart".to_owned());
+        open.insert("🗠 Plot".to_owned());
 
         Self {
             label: "foobar".into(),
@@ -231,15 +231,6 @@ impl eframe::App for TemplateApp {
                 }
             });
         });
-
-        if true {
-            egui::Window::new("Window").show(ctx, |ui| {
-                ui.label("Windows can be moved by dragging them.");
-                ui.label("They are automatically sized based on contents.");
-                ui.label("You can turn on resizing and scrolling if you like.");
-                ui.label("You would normally choose either panels OR windows.");
-            });
-        }
     }
 }
 

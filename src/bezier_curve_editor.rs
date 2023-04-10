@@ -82,7 +82,7 @@ impl BezierCurveEditor {
                 let point_response = ui.interact(point_rect, point_id, Sense::drag());
 
                 *point += point_response.drag_delta();
-                *point = to_screen.from().clamp(*point);
+                // *point = to_screen.from().clamp(*point); // dont clamp
 
                 let point_in_screen = to_screen.transform_pos(*point);
                 let stroke = ui.style().interact(&point_response).fg_stroke;

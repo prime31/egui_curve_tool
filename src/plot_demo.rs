@@ -1,7 +1,6 @@
 use std::f64::consts::TAU;
 
-use eframe::emath::RectTransform;
-use egui::plot::{CoordinatesFormatter, PlotBounds, PlotUi};
+use egui::plot::{CoordinatesFormatter, PlotBounds, PlotPoint, PlotUi};
 use egui::*;
 use plot::{Corner, Line, LineStyle, Plot, PlotPoints};
 
@@ -72,11 +71,36 @@ impl AnimationKey {
     fn new(pos: Vec2) -> AnimationKey {
         AnimationKey {
             pos,
-            tangent_in: Vec2::new(-0.01, 0.0),
-            tangent_out: Vec2::new(0.01, 0.0),
+            tangent_in: Vec2::new(-0.03, 0.0),
+            tangent_out: Vec2::new(0.03, 0.0),
             ..Default::default()
         }
     }
+}
+
+impl Into<AnimationKeyPoint> for &AnimationKey {
+    fn into(self) -> AnimationKeyPoint {
+        AnimationKeyPoint {
+            pos: self.pos,
+            tangent_in: self.tangent_in,
+            tangent_out: self.tangent_out,
+        }
+    }
+}
+
+#[derive(Default, PartialEq)]
+struct AnimationKeyPoint {
+    pos: Vec2,
+    tangent_in: Vec2,
+    tangent_out: Vec2,
+}
+
+#[derive(Default, PartialEq)]
+enum AnimationKeyPointField {
+    #[default]
+    Pos,
+    TanIn,
+    TanOut,
 }
 
 #[derive(PartialEq)]
@@ -84,9 +108,11 @@ struct LineDemo {
     circle_radius: f64,
     constrain_to_01: bool,
     dragging_my_circle: bool,
+    dragged_object: Option<(usize, AnimationKeyPointField)>,
     my_circle_pos: Pos2,
-    interact_pos: Option<Pos2>,
+    left_click_pos: Option<Pos2>,
     points: Vec<AnimationKey>,
+    points_for_drawing: Vec<AnimationKeyPoint>,
 }
 
 impl Default for LineDemo {
@@ -95,12 +121,15 @@ impl Default for LineDemo {
             circle_radius: 0.05,
             constrain_to_01: false,
             dragging_my_circle: false,
+            dragged_object: None,
             my_circle_pos: Pos2::new(0., 0.),
-            interact_pos: None,
+            left_click_pos: None,
             points: vec![
                 AnimationKey::new(Vec2::new(0.0, 0.0)),
+                AnimationKey::new(Vec2::new(0.5, 0.5)),
                 AnimationKey::new(Vec2::new(1.0, 1.0)),
             ],
+            points_for_drawing: vec![],
         }
     }
 }
@@ -118,6 +147,17 @@ impl LineDemo {
             ui.add(egui::Slider::new(circle_radius, 1.0..=1000.0));
             ui.toggle_value(constrain_to_01, "0 - 1 Range");
         });
+    }
+
+    fn ensure_drawing_points_capacity(&mut self) {
+        if self.points.len() != self.points_for_drawing.len() {
+            self.points_for_drawing = self.points.iter().map(|p| p.into()).collect();
+        }
+    }
+
+    fn add_animation_key(&mut self, pos: Vec2) {
+        self.points.push(AnimationKey::new(pos));
+        self.points_for_drawing.push(self.points.last().unwrap().into());
     }
 
     fn draw(&self, key: &AnimationKey, plot_ui: &mut PlotUi) {
@@ -139,7 +179,7 @@ impl LineDemo {
             .style(LineStyle::Solid)
     }
 
-    fn my_circle(&self, trans: RectTransform) -> Line {
+    fn my_circle(&self) -> Line {
         let n = 15;
         let circle_points: PlotPoints = (0..=n)
             .map(|i| {
@@ -172,15 +212,17 @@ impl LineDemo {
     fn ui(&mut self, ui: &mut Ui) -> Response {
         self.options_ui(ui);
 
+        self.ensure_drawing_points_capacity();
+
         let mut plot = Plot::new("lines_demo")
-            // .allow_drag(false)
-            // .allow_scroll(false)
-            // .allow_zoom(false)
-            .allow_boxed_zoom(false)
+            .allow_drag(!self.dragging_my_circle)
+            .allow_scroll(!self.dragging_my_circle)
+            .allow_zoom(!self.dragging_my_circle)
+            .allow_boxed_zoom(!self.dragging_my_circle)
             .show_x(false)
             .show_y(false)
             .min_size(Vec2::new(128., 128.))
-            .data_aspect(1.0)
+            // .data_aspect(1.0)
             // .view_aspect(1.0)
             .height(ui.available_height() - 151.); // magic number for 3 lines of logs on the bottom
 
@@ -190,7 +232,7 @@ impl LineDemo {
 
         let InnerResponse {
             mut response,
-            inner: (drag_delta, ptr_coord, bounds),
+            inner: (drag_delta, ptr_coord, ptr_coord_screen, bounds),
         } = plot.show(ui, |plot_ui| {
             // if self.constrain_to_01 {
             //     plot_ui.set_plot_bounds(PlotBounds::from_min_max([-0.1, -0.1], [1.1, 1.1]));
@@ -198,46 +240,64 @@ impl LineDemo {
             //     plot_ui.set_plot_bounds(PlotBounds::from_min_max([-0.1, -1.1], [1.1, 1.1]));
             // }
 
-            let min_pt = plot_ui.screen_from_plot(plot::PlotPoint::new(
-                plot_ui.plot_bounds().min()[0],
-                plot_ui.plot_bounds().min()[1],
-            ));
-            let max_pt = plot_ui.screen_from_plot(plot::PlotPoint::new(
-                plot_ui.plot_bounds().max()[0],
-                plot_ui.plot_bounds().max()[1],
-            ));
+            // clamp x min of the graph
+            let y_min = if self.constrain_to_01 { -0.1 } else { -1.1 };
+            let mut min_bounds = plot_ui.plot_bounds().min();
+            if min_bounds[0] != -0.1 || min_bounds[1] < y_min {
+                min_bounds[0] = -0.1;
+                min_bounds[1] = min_bounds[1].clamp(y_min, 100.0);
 
-            let actul_aspect = (max_pt.x - min_pt.x) / (min_pt.y - max_pt.y);
-            let plot_aspect_ratio = plot_ui.plot_bounds().width() / plot_ui.plot_bounds().height();
+                let mut max_bounds = plot_ui.plot_bounds().max();
+                let bounds = plot_ui.plot_bounds();
+                max_bounds[0] -= bounds.min()[0] - min_bounds[0];
+                max_bounds[1] -= bounds.min()[1] - min_bounds[1];
 
-            println!(
-                "aspect: {:.2?}, min: {:?}, max: {:?}, aspect: {}",
-                plot_aspect_ratio, min_pt, max_pt, actul_aspect
-            );
+                plot_ui.set_plot_bounds(PlotBounds::from_min_max(min_bounds, max_bounds));
+            }
 
-            let min = plot_ui.plot_bounds().min().map(|i| i as f32);
-            let max = plot_ui.plot_bounds().max().map(|i| i as f32);
-            let from = Rect::from_min_max(min.into(), max.into());
-            let to_screen = emath::RectTransform::from_to(from, Rect::from_min_max(min_pt, max_pt));
+            // clamp y max of the graph
+            let mut max_bounds = plot_ui.plot_bounds().max();
+            if max_bounds[1] > 1.1 {
+                max_bounds[1] = max_bounds[1].clamp(y_min, 1.1);
+                plot_ui.set_plot_bounds(PlotBounds::from_min_max(min_bounds, max_bounds));
+            }
 
-            plot_ui.line(self.my_circle(to_screen));
+            max_bounds[0] = 1.1;
+            plot_ui.set_plot_bounds(PlotBounds::from_min_max(min_bounds, max_bounds));
 
-            plot_ui.ctx().input(|i| {
+            let t = plot_ui.ctx().input(|i| {
                 if i.pointer.primary_clicked() {
-                    self.interact_pos = i.pointer.interact_pos()
+                    self.left_click_pos = i.pointer.interact_pos()
                 }
                 if i.pointer.primary_released() {
-                    self.interact_pos = None;
+                    self.left_click_pos = None;
                 }
             });
+
+            // convert to screen spa
+            for (i, pt) in self.points.iter().enumerate() {
+                self.points_for_drawing[i].pos = plot_ui.screen_from_plot(PlotPoint::new(pt.pos.x, pt.pos.y)).to_vec2();
+                self.points_for_drawing[i].tangent_in = plot_ui
+                    .screen_from_plot(PlotPoint::new(pt.pos.x + pt.tangent_in.x, pt.pos.y + pt.tangent_in.y))
+                    .to_vec2();
+                self.points_for_drawing[i].tangent_out = plot_ui
+                    .screen_from_plot(PlotPoint::new(pt.pos.x + pt.tangent_out.x, pt.pos.y + pt.tangent_out.y))
+                    .to_vec2();
+            }
+
             (
                 plot_ui.pointer_coordinate_drag_delta(),
                 plot_ui.pointer_coordinate(),
+                if let Some(pt) = plot_ui.pointer_coordinate() {
+                    Some(plot_ui.screen_from_plot(pt))
+                } else {
+                    None
+                },
                 plot_ui.plot_bounds(),
             )
         });
 
-        if self.interact_pos.is_some() {
+        if self.left_click_pos.is_some() {
             if self.my_circle_pos.distance(ptr_coord.unwrap().to_pos2()) < self.circle_radius as f32 {
                 self.dragging_my_circle = true;
                 response = response.on_hover_cursor(CursorIcon::Move);
@@ -245,13 +305,29 @@ impl LineDemo {
         }
         if response.drag_released() {
             self.dragging_my_circle = false;
+            self.my_circle_pos = self.my_circle_pos.clamp(Pos2::new(0., -1.), Pos2::new(1., 1.))
         }
 
         if self.dragging_my_circle {
             self.my_circle_pos += drag_delta;
         }
 
-        if let Some(ptr_coord) = ptr_coord {
+        for pt in &self.points_for_drawing {
+            ui.painter().circle_filled(pt.pos.to_pos2(), 5.0, Color32::LIGHT_GREEN);
+            ui.painter()
+                .circle_filled(pt.tangent_in.to_pos2(), 3.0, Color32::LIGHT_RED);
+            ui.painter()
+                .circle_filled(pt.tangent_out.to_pos2(), 3.0, Color32::LIGHT_RED);
+        }
+
+        if let (Some(ptr_coord), Some(ptr_coord_screen)) = (ptr_coord, ptr_coord_screen) {
+            if !self.dragging_my_circle && self.my_circle_pos.distance(ptr_coord.to_pos2()) < self.circle_radius as f32
+            {
+                response = response.on_hover_cursor(CursorIcon::Grab);
+            }
+
+            // ui.painter().circle_filled(ptr_coord_screen, 10.0, Color32::LIGHT_GREEN);
+
             ui.label(format!(
                 "in circle {:?}, dragging circle: {}",
                 self.my_circle_pos.distance(ptr_coord.to_pos2()) < self.circle_radius as f32,
@@ -260,8 +336,8 @@ impl LineDemo {
 
             ui.label(format!(
                 "interact pos {:.2},{:.2}, delta: {:.2},{:.2}, ptr coord: {:.2},{:.2}",
-                self.interact_pos.unwrap_or(Pos2::ZERO).x,
-                self.interact_pos.unwrap_or(Pos2::ZERO).y,
+                self.left_click_pos.unwrap_or(Pos2::ZERO).x,
+                self.left_click_pos.unwrap_or(Pos2::ZERO).y,
                 drag_delta.x,
                 drag_delta.y,
                 ptr_coord.x,
