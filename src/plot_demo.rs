@@ -1,5 +1,6 @@
 use std::f64::consts::TAU;
 
+use eframe::emath::RectTransform;
 use egui::plot::{CoordinatesFormatter, PlotBounds, PlotUi};
 use egui::*;
 use plot::{Corner, Line, LineStyle, Plot, PlotPoints};
@@ -21,7 +22,10 @@ impl super::Demo for PlotDemo {
         Window::new(self.name())
             .open(open)
             .default_size(vec2(400.0, 400.0))
-            .vscroll(false)
+            .min_width(200.)
+            .min_height(300.)
+            // .fixed_size(vec2(400.0, 400.0))
+            .vscroll(true) // todo: temp fix for debug data on bottom
             .show(ctx, |ui| self.ui(ui));
     }
 }
@@ -77,11 +81,8 @@ impl AnimationKey {
 
 #[derive(PartialEq)]
 struct LineDemo {
-    time: f64,
     circle_radius: f64,
-    plot_scale: f64,
-    circle_center: Pos2,
-    line_style: LineStyle,
+    constrain_to_01: bool,
     dragging_my_circle: bool,
     my_circle_pos: Pos2,
     interact_pos: Option<Pos2>,
@@ -91,13 +92,10 @@ struct LineDemo {
 impl Default for LineDemo {
     fn default() -> Self {
         Self {
-            time: 0.0,
-            circle_radius: 0.001,
-            plot_scale: 0.005,
-            circle_center: Pos2::new(0.0, 0.0),
-            line_style: LineStyle::Solid,
+            circle_radius: 0.05,
+            constrain_to_01: false,
             dragging_my_circle: false,
-            my_circle_pos: Pos2::new(0.3, 0.3),
+            my_circle_pos: Pos2::new(0., 0.),
             interact_pos: None,
             points: vec![
                 AnimationKey::new(Vec2::new(0.0, 0.0)),
@@ -110,54 +108,22 @@ impl Default for LineDemo {
 impl LineDemo {
     fn options_ui(&mut self, ui: &mut Ui) {
         let Self {
-            time: _,
             circle_radius,
-            circle_center,
-            line_style,
+            constrain_to_01,
             ..
         } = self;
 
         ui.horizontal(|ui| {
-            ui.group(|ui| {
-                ui.vertical(|ui| {
-                    ui.label("Circle:");
-                    ui.add(
-                        egui::DragValue::new(circle_radius)
-                            .speed(0.1)
-                            .clamp_range(0.0..=f64::INFINITY)
-                            .prefix("r: "),
-                    );
-                    ui.horizontal(|ui| {
-                        ui.add(egui::DragValue::new(&mut circle_center.x).speed(0.1).prefix("x: "));
-                        ui.add(egui::DragValue::new(&mut circle_center.y).speed(1.0).prefix("y: "));
-                    });
-                });
-            });
-
-            ui.vertical(|ui| {
-                ui.style_mut().wrap = Some(false);
-
-                ComboBox::from_label("Line style")
-                    .selected_text(line_style.to_string())
-                    .show_ui(ui, |ui| {
-                        for style in &[
-                            LineStyle::Solid,
-                            LineStyle::dashed_dense(),
-                            LineStyle::dashed_loose(),
-                            LineStyle::dotted_dense(),
-                            LineStyle::dotted_loose(),
-                        ] {
-                            ui.selectable_value(line_style, *style, style.to_string());
-                        }
-                    });
-            });
+            ui.style_mut().wrap = Some(false);
+            ui.add(egui::Slider::new(circle_radius, 1.0..=1000.0));
+            ui.toggle_value(constrain_to_01, "0 - 1 Range");
         });
     }
 
     fn draw(&self, key: &AnimationKey, plot_ui: &mut PlotUi) {
         plot_ui.line(self.circle(key.pos, self.circle_radius));
-        plot_ui.line(self.circle(key.pos + key.tangent_in, self.plot_scale * 3.0));
-        plot_ui.line(self.circle(key.pos + key.tangent_out, self.plot_scale * 3.0));
+        plot_ui.line(self.circle(key.pos + key.tangent_in, 0.1));
+        plot_ui.line(self.circle(key.pos + key.tangent_out, 0.1));
     }
 
     fn circle(&self, pos: Vec2, radius: f64) -> Line {
@@ -173,45 +139,31 @@ impl LineDemo {
             .style(LineStyle::Solid)
     }
 
-    fn my_circle(&self) -> Line {
+    fn my_circle(&self, trans: RectTransform) -> Line {
         let n = 15;
         let circle_points: PlotPoints = (0..=n)
             .map(|i| {
                 let t = remap(i as f64, 0.0..=(n as f64), 0.0..=TAU);
                 let r = self.circle_radius;
                 [
-                    r * t.cos() + self.my_circle_pos.x as f64,
-                    r * t.sin() + self.my_circle_pos.y as f64,
+                    (r * t.cos() + self.my_circle_pos.x as f64),
+                    (r * t.sin() + self.my_circle_pos.y as f64),
                 ]
             })
             .collect();
+
         Line::new(circle_points)
             .color(Color32::from_rgb(100, 200, 100))
-            .style(self.line_style)
             .name("my circle")
     }
 
-    fn sin(&self) -> Line {
-        let time = self.time + 0.5;
-        Line::new(PlotPoints::from_explicit_callback(
-            move |x| 0.5 * (2.0 * x).sin() * time.sin(),
-            ..,
-            512,
-        ))
-        .color(Color32::from_rgb(200, 100, 100))
-        .style(self.line_style)
-        .name("wave")
-    }
-
     fn thingy(&self) -> Line {
-        let time = self.time;
         Line::new(PlotPoints::from_parametric_callback(
-            move |t| ((2.0 * t + time).sin(), (3.0 * t).sin()),
+            move |t| ((2.0 * t).sin(), (3.0 * t).sin()),
             0.0..=TAU,
             256,
         ))
         .color(Color32::from_rgb(100, 150, 250))
-        .style(self.line_style)
         .name("x = sin(2t), y = sin(3t)")
     }
 }
@@ -221,17 +173,16 @@ impl LineDemo {
         self.options_ui(ui);
 
         let mut plot = Plot::new("lines_demo")
-            .allow_drag(!self.dragging_my_circle)
-            .allow_scroll(!self.dragging_my_circle)
-            // .set_margin_fraction(Vec2::new(0.1, 0.1)) // used only with auto
-            // .auto_bounds_x()
-            // .auto_bounds_y()
-            // .include_x(0.0)
-            // .include_y(0.0)
+            // .allow_drag(false)
+            // .allow_scroll(false)
+            // .allow_zoom(false)
+            .allow_boxed_zoom(false)
             .show_x(false)
             .show_y(false)
+            .min_size(Vec2::new(128., 128.))
             .data_aspect(1.0)
-            .height(250.0);
+            // .view_aspect(1.0)
+            .height(ui.available_height() - 151.); // magic number for 3 lines of logs on the bottom
 
         if self.dragging_my_circle {
             plot = plot.coordinates_formatter(Corner::LeftBottom, CoordinatesFormatter::default());
@@ -241,25 +192,35 @@ impl LineDemo {
             mut response,
             inner: (drag_delta, ptr_coord, bounds),
         } = plot.show(ui, |plot_ui| {
-            plot_ui.line(self.my_circle());
+            // if self.constrain_to_01 {
+            //     plot_ui.set_plot_bounds(PlotBounds::from_min_max([-0.1, -0.1], [1.1, 1.1]));
+            // } else {
+            //     plot_ui.set_plot_bounds(PlotBounds::from_min_max([-0.1, -1.1], [1.1, 1.1]));
+            // }
 
-            for pt in &self.points {
-                self.draw(pt, plot_ui);
-            }
+            let min_pt = plot_ui.screen_from_plot(plot::PlotPoint::new(
+                plot_ui.plot_bounds().min()[0],
+                plot_ui.plot_bounds().min()[1],
+            ));
+            let max_pt = plot_ui.screen_from_plot(plot::PlotPoint::new(
+                plot_ui.plot_bounds().max()[0],
+                plot_ui.plot_bounds().max()[1],
+            ));
 
-            // clamp x min of the graph
-            let mut min_bounds = plot_ui.plot_bounds().min();
-            if min_bounds[0] < -0.1 {
-                // || min_bounds[1] < -1.1 {
-                min_bounds[0] = min_bounds[0].clamp(-0.1, 100.0);
-                // min_bounds[1] = min_bounds[1].clamp(-1.1, 100.0);
+            let actul_aspect = (max_pt.x - min_pt.x) / (min_pt.y - max_pt.y);
+            let plot_aspect_ratio = plot_ui.plot_bounds().width() / plot_ui.plot_bounds().height();
 
-                let mut max_bounds = plot_ui.plot_bounds().max();
-                let bounds = plot_ui.plot_bounds();
-                max_bounds[0] -= bounds.min()[0] - min_bounds[0];
-                // max_bounds[1] -= bounds.min()[1] - min_bounds[1];
-                plot_ui.set_plot_bounds(PlotBounds::from_min_max(min_bounds, max_bounds));
-            }
+            println!(
+                "aspect: {:.2?}, min: {:?}, max: {:?}, aspect: {}",
+                plot_aspect_ratio, min_pt, max_pt, actul_aspect
+            );
+
+            let min = plot_ui.plot_bounds().min().map(|i| i as f32);
+            let max = plot_ui.plot_bounds().max().map(|i| i as f32);
+            let from = Rect::from_min_max(min.into(), max.into());
+            let to_screen = emath::RectTransform::from_to(from, Rect::from_min_max(min_pt, max_pt));
+
+            plot_ui.line(self.my_circle(to_screen));
 
             plot_ui.ctx().input(|i| {
                 if i.pointer.primary_clicked() {
@@ -313,15 +274,14 @@ impl LineDemo {
             let y = bounds.max()[1] - bounds.min()[1];
             x.max(y)
         };
-        self.circle_radius = largest_range * 0.005;
-        self.plot_scale = largest_range / ui.available_size_before_wrap().x as f64;
+        // self.circle_radius = largest_range * 0.005;
+        // self.plot_scale = largest_range / ui.available_size_before_wrap().x as f64;
 
         ui.label(format!(
-            "plot bounds: min: {:.02?}, max: {:.02?}, largest_range: {:0.2?}, scale: {:0.6?}",
+            "plot bounds: min: {:.02?}, max: {:.02?}, largest_range: {:0.2?}",
             bounds.min(),
             bounds.max(),
             largest_range,
-            self.plot_scale
         ));
 
         response
