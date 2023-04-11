@@ -152,6 +152,7 @@ struct LineDemo {
     constrain_to_01: bool,
     dragged_object: Option<(usize, AnimationKeyPointField)>,
     hovered_object: Option<(usize, AnimationKeyPointField)>,
+    right_click_pos: Option<Pos2>,
     points: Vec<AnimationKey>,
     points_for_drawing: Vec<AnimationKeyPoint>,
 }
@@ -163,6 +164,7 @@ impl Default for LineDemo {
             constrain_to_01: false,
             dragged_object: None,
             hovered_object: None,
+            right_click_pos: None,
             points: vec![
                 AnimationKey::new(Vec2::new(0.0, 0.0)),
                 AnimationKey::new(Vec2::new(0.5, 0.5)),
@@ -209,9 +211,13 @@ impl LineDemo {
         None
     }
 
-    fn add_animation_key(&mut self, pos: Vec2) {
-        self.points.push(AnimationKey::new(pos));
+    fn add_key(&mut self, pos: Vec2) {
+        let y_min = if self.constrain_to_01 { 0. } else { -1. };
+        let new_pos = pos.clamp(Vec2::new(0., y_min), Vec2::new(1., 1.));
+
+        self.points.push(AnimationKey::new(new_pos));
         self.points_for_drawing.push(self.points.last().unwrap().into());
+        self.points.sort_by(|a, b| a.pos.x.partial_cmp(&b.pos.x).unwrap());
     }
 
     fn update_dragged_object(&mut self, drag_delta: Vec2) {
@@ -341,7 +347,11 @@ impl LineDemo {
         }
 
         // hover cursor if ptr is in plot rect
-        if let Some(ptr_coord) = ptr_coord {
+        if let Some(mut ptr_coord) = ptr_coord {
+            if let Some(right_click_pos) = self.right_click_pos {
+                ptr_coord = PlotPoint::new(right_click_pos.x as f64, right_click_pos.y as f64);
+            }
+
             if let (None, Some(hovered)) = (&self.dragged_object, self.intersected_key(ptr_coord.to_pos2())) {
                 self.hovered_object = Some(hovered);
                 if hovered.1 != AnimationKeyPointField::Pos && ui.input(|i| i.modifiers.command) {
@@ -351,6 +361,8 @@ impl LineDemo {
                 } else {
                     response = response.on_hover_cursor(CursorIcon::Grab);
                 }
+            } else if ui.input(|i| i.modifiers.alt) {
+                response = response.on_hover_cursor(CursorIcon::Copy);
             }
 
             ui.label(format!(
@@ -368,6 +380,10 @@ impl LineDemo {
             let mut showing_contex_menu = false;
             response = response.context_menu(|ui| {
                 showing_contex_menu = true;
+
+                if let (None, Some(ptr_pos)) = (self.right_click_pos, ptr_coord) {
+                    self.right_click_pos = Some(Pos2::new(ptr_pos.x as f32, ptr_pos.y as f32));
+                }
 
                 let hovered = self.hovered_object.as_ref().unwrap();
                 match hovered.1 {
@@ -422,9 +438,16 @@ impl LineDemo {
                 self.hovered_object = None;
             }
         } else {
+            let mut showing_contex_menu = false;
             response = response.context_menu(|ui| {
+                showing_contex_menu = true;
+
+                if let (None, Some(ptr_pos)) = (self.right_click_pos, ptr_coord) {
+                    self.right_click_pos = Some(Pos2::new(ptr_pos.x as f32, ptr_pos.y as f32));
+                }
+
                 if ui.button("Add Key Here").clicked() {
-                    println!("pos to add: {:?}", ptr_coord);
+                    self.add_key(self.right_click_pos.unwrap().to_vec2());
                     ui.close_menu();
                 }
                 ui.separator();
@@ -432,6 +455,15 @@ impl LineDemo {
                     ui.close_menu();
                 }
             });
+
+            if !showing_contex_menu {
+                self.right_click_pos = None;
+
+                // alt click to add point
+                if response.clicked() && ui.input(|i| i.modifiers.alt) {
+                    self.add_key(ptr_coord.unwrap().to_vec2());
+                }
+            }
         }
 
         let largest_range = {
@@ -441,11 +473,12 @@ impl LineDemo {
         };
 
         ui.label(format!(
-            "plot bounds: min: {:.02?}, max: {:.02?}, largest_range: {:0.2?}, hovered: {:?}",
+            "plot bounds: min: {:.02?}, max: {:.02?}, largest_range: {:0.2?}, hovered: {:?}, right click: {:?}",
             bounds.min(),
             bounds.max(),
             largest_range,
-            self.hovered_object
+            self.hovered_object,
+            self.right_click_pos
         ));
 
         response
