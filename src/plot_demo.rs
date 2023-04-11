@@ -1,10 +1,15 @@
-use std::f64::consts::TAU;
-
 use egui::plot::{CoordinatesFormatter, PlotBounds, PlotPoint, PlotUi};
 use egui::*;
-use plot::{Corner, Line, LineStyle, Plot, PlotPoints};
+use plot::{Corner, Line, LineStyle, Plot};
 
-// ----------------------------------------------------------------------------
+const POINT_RADIUS: f32 = 5.0;
+const CONTROL_POINT_RADIUS: f32 = 3.0;
+const CIRCLE_CLICK_RADIUS: f32 = 0.02;
+
+const CURVE_COLOR: Color32 = Color32::DARK_GRAY;
+const POINT_COLOR: Color32 = Color32::LIGHT_GREEN;
+const CONTROL_POINT_COLOR: Color32 = Color32::DARK_GREEN;
+const CONTROL_POINT_LINE_COLOR: Color32 = Color32::LIGHT_GREEN;
 
 #[derive(PartialEq, Default)]
 pub struct PlotDemo {
@@ -51,19 +56,11 @@ impl super::View for PlotDemo {
     }
 }
 
-#[derive(Default, PartialEq)]
-enum AnimationKeyInterpolation {
-    #[default]
-    None,
-    Step,
-}
-
-#[derive(Default, PartialEq)]
+#[derive(Default, PartialEq, Clone)]
 struct AnimationKey {
     pos: Vec2,
     tangent_in: Vec2,
     tangent_out: Vec2,
-    interopolation: AnimationKeyInterpolation,
     tangent_locked: bool,
 }
 
@@ -73,8 +70,60 @@ impl AnimationKey {
             pos,
             tangent_in: Vec2::new(-0.03, 0.0),
             tangent_out: Vec2::new(0.03, 0.0),
-            ..Default::default()
+            tangent_locked: true,
         }
+    }
+
+    fn tangent_in_screen(&self) -> Pos2 {
+        (self.pos + self.tangent_in).to_pos2()
+    }
+
+    fn tangent_out_screen(&self) -> Pos2 {
+        (self.pos + self.tangent_out).to_pos2()
+    }
+
+    fn intersects(&self, ptr_coord: Pos2) -> Option<AnimationKeyPointField> {
+        if self.pos.to_pos2().distance(ptr_coord) < CIRCLE_CLICK_RADIUS {
+            return Some(AnimationKeyPointField::Pos);
+        }
+
+        if self.tangent_in_screen().distance(ptr_coord) < CIRCLE_CLICK_RADIUS {
+            return Some(AnimationKeyPointField::TanIn);
+        }
+
+        if self.tangent_out_screen().distance(ptr_coord) < CIRCLE_CLICK_RADIUS {
+            return Some(AnimationKeyPointField::TanOut);
+        }
+        return None;
+    }
+
+    fn translate(&mut self, key_field: &AnimationKeyPointField, delta: Vec2) {
+        match key_field {
+            AnimationKeyPointField::Pos => self.pos += delta,
+            AnimationKeyPointField::TanIn => {
+                self.tangent_in += delta;
+                if self.tangent_locked {
+                    self.tangent_out -= delta;
+                }
+            }
+            AnimationKeyPointField::TanOut => {
+                self.tangent_out += delta;
+                if self.tangent_locked {
+                    self.tangent_in -= delta;
+                }
+            }
+        }
+    }
+
+    fn toggle_tangent(&mut self, key_field: AnimationKeyPointField) {
+        if !self.tangent_locked {
+            match key_field {
+                AnimationKeyPointField::TanIn => self.tangent_out = -self.tangent_in,
+                AnimationKeyPointField::TanOut => self.tangent_in = -self.tangent_out,
+                _ => {}
+            }
+        }
+        self.tangent_locked = !self.tangent_locked;
     }
 }
 
@@ -95,9 +144,8 @@ struct AnimationKeyPoint {
     tangent_out: Vec2,
 }
 
-#[derive(Default, PartialEq)]
+#[derive(PartialEq, Debug, Clone, Copy)]
 enum AnimationKeyPointField {
-    #[default]
     Pos,
     TanIn,
     TanOut,
@@ -107,10 +155,8 @@ enum AnimationKeyPointField {
 struct LineDemo {
     circle_radius: f64,
     constrain_to_01: bool,
-    dragging_my_circle: bool,
     dragged_object: Option<(usize, AnimationKeyPointField)>,
-    my_circle_pos: Pos2,
-    left_click_pos: Option<Pos2>,
+    hovered_object: Option<(usize, AnimationKeyPointField)>,
     points: Vec<AnimationKey>,
     points_for_drawing: Vec<AnimationKeyPoint>,
 }
@@ -120,10 +166,8 @@ impl Default for LineDemo {
         Self {
             circle_radius: 0.05,
             constrain_to_01: false,
-            dragging_my_circle: false,
             dragged_object: None,
-            my_circle_pos: Pos2::new(0., 0.),
-            left_click_pos: None,
+            hovered_object: None,
             points: vec![
                 AnimationKey::new(Vec2::new(0.0, 0.0)),
                 AnimationKey::new(Vec2::new(0.5, 0.5)),
@@ -155,56 +199,46 @@ impl LineDemo {
         }
     }
 
+    fn intersected_key(&self, ptr_coord: Pos2) -> Option<(usize, AnimationKeyPointField)> {
+        for (i, pt) in self.points.iter().enumerate() {
+            if let Some(key_point_field) = pt.intersects(ptr_coord) {
+                return Some((i, key_point_field));
+            }
+        }
+        None
+    }
+
     fn add_animation_key(&mut self, pos: Vec2) {
         self.points.push(AnimationKey::new(pos));
         self.points_for_drawing.push(self.points.last().unwrap().into());
     }
 
-    fn draw(&self, key: &AnimationKey, plot_ui: &mut PlotUi) {
-        plot_ui.line(self.circle(key.pos, self.circle_radius));
-        plot_ui.line(self.circle(key.pos + key.tangent_in, 0.1));
-        plot_ui.line(self.circle(key.pos + key.tangent_out, 0.1));
+    fn update_dragged_object(&mut self, drag_delta: Vec2) {
+        if let Some(ref mut dragged) = self.dragged_object {
+            self.points[dragged.0].translate(&dragged.1, drag_delta);
+            if dragged.1 == AnimationKeyPointField::Pos {
+                let key = self.points[dragged.0].clone();
+                self.points.sort_by(|a, b| a.pos.x.partial_cmp(&b.pos.x).unwrap());
+                dragged.0 = self.points.iter().position(|e| *e == key).unwrap();
+            }
+        }
     }
 
-    fn circle(&self, pos: Vec2, radius: f64) -> Line {
-        let n = 15;
-        let circle_points: PlotPoints = (0..=n)
-            .map(|i| {
-                let t = remap(i as f64, 0.0..=(n as f64), 0.0..=TAU);
-                [radius * t.cos() + pos.x as f64, radius * t.sin() + pos.y as f64]
-            })
-            .collect();
-        Line::new(circle_points)
-            .color(Color32::from_rgb(100, 200, 100))
-            .style(LineStyle::Solid)
+    fn curve(&self) -> Line {
+        let pts: Vec<_> = self.points.iter().map(|f| [f.pos.x as f64, f.pos.y as f64]).collect();
+        Line::new(pts).color(CURVE_COLOR).style(LineStyle::Solid)
     }
 
-    fn my_circle(&self) -> Line {
-        let n = 15;
-        let circle_points: PlotPoints = (0..=n)
-            .map(|i| {
-                let t = remap(i as f64, 0.0..=(n as f64), 0.0..=TAU);
-                let r = self.circle_radius;
-                [
-                    (r * t.cos() + self.my_circle_pos.x as f64),
-                    (r * t.sin() + self.my_circle_pos.y as f64),
-                ]
-            })
-            .collect();
-
-        Line::new(circle_points)
-            .color(Color32::from_rgb(100, 200, 100))
-            .name("my circle")
-    }
-
-    fn thingy(&self) -> Line {
-        Line::new(PlotPoints::from_parametric_callback(
-            move |t| ((2.0 * t).sin(), (3.0 * t).sin()),
-            0.0..=TAU,
-            256,
-        ))
-        .color(Color32::from_rgb(100, 150, 250))
-        .name("x = sin(2t), y = sin(3t)")
+    fn tangent_lines(&self, plot_ui: &mut PlotUi) {
+        for pt in &self.points {
+            let pos = [pt.pos.x as f64, pt.pos.y as f64];
+            let pts = vec![
+                [pos[0] + pt.tangent_in.x as f64, pos[1] + pt.tangent_in.y as f64],
+                pos,
+                [pos[0] + pt.tangent_out.x as f64, pos[1] + pt.tangent_out.y as f64],
+            ];
+            plot_ui.line(Line::new(pts).color(CONTROL_POINT_LINE_COLOR));
+        }
     }
 }
 
@@ -215,10 +249,11 @@ impl LineDemo {
         self.ensure_drawing_points_capacity();
 
         let mut plot = Plot::new("lines_demo")
-            .allow_drag(!self.dragging_my_circle)
-            .allow_scroll(!self.dragging_my_circle)
-            .allow_zoom(!self.dragging_my_circle)
-            .allow_boxed_zoom(!self.dragging_my_circle)
+            .allow_drag(self.dragged_object.is_none())
+            .allow_scroll(self.dragged_object.is_none())
+            .allow_zoom(self.dragged_object.is_none())
+            .allow_boxed_zoom(self.dragged_object.is_none())
+            .allow_double_click_reset(false)
             .show_x(false)
             .show_y(false)
             .min_size(Vec2::new(128., 128.))
@@ -226,19 +261,17 @@ impl LineDemo {
             // .view_aspect(1.0)
             .height(ui.available_height() - 151.); // magic number for 3 lines of logs on the bottom
 
-        if self.dragging_my_circle {
+        if self.dragged_object.is_some() {
             plot = plot.coordinates_formatter(Corner::LeftBottom, CoordinatesFormatter::default());
         }
 
         let InnerResponse {
             mut response,
-            inner: (drag_delta, ptr_coord, ptr_coord_screen, bounds),
+            inner: (left_click_pos, drag_delta, ptr_coord, ptr_coord_screen, bounds),
         } = plot.show(ui, |plot_ui| {
-            // if self.constrain_to_01 {
-            //     plot_ui.set_plot_bounds(PlotBounds::from_min_max([-0.1, -0.1], [1.1, 1.1]));
-            // } else {
-            //     plot_ui.set_plot_bounds(PlotBounds::from_min_max([-0.1, -1.1], [1.1, 1.1]));
-            // }
+            // draw the curve
+            plot_ui.line(self.curve());
+            self.tangent_lines(plot_ui);
 
             // clamp x min of the graph
             let y_min = if self.constrain_to_01 { -0.1 } else { -1.1 };
@@ -265,13 +298,11 @@ impl LineDemo {
             max_bounds[0] = 1.1;
             plot_ui.set_plot_bounds(PlotBounds::from_min_max(min_bounds, max_bounds));
 
-            let t = plot_ui.ctx().input(|i| {
+            let left_click_pos = plot_ui.ctx().input(|i| {
                 if i.pointer.primary_clicked() {
-                    self.left_click_pos = i.pointer.interact_pos()
+                    return i.pointer.interact_pos();
                 }
-                if i.pointer.primary_released() {
-                    self.left_click_pos = None;
-                }
+                None
             });
 
             // convert to screen spa
@@ -286,6 +317,7 @@ impl LineDemo {
             }
 
             (
+                left_click_pos,
                 plot_ui.pointer_coordinate_drag_delta(),
                 plot_ui.pointer_coordinate(),
                 if let Some(pt) = plot_ui.pointer_coordinate() {
@@ -297,47 +329,49 @@ impl LineDemo {
             )
         });
 
-        if self.left_click_pos.is_some() {
-            if self.my_circle_pos.distance(ptr_coord.unwrap().to_pos2()) < self.circle_radius as f32 {
-                self.dragging_my_circle = true;
-                response = response.on_hover_cursor(CursorIcon::Move);
-            }
+        let painter = ui.painter_at(response.rect);
+
+        // check for click/drag
+        if left_click_pos.is_some() && ptr_coord.is_some() {
+            let ptr_coord = ptr_coord.unwrap().to_pos2();
+            self.dragged_object = self.intersected_key(ptr_coord);
         }
+
         if response.drag_released() {
-            self.dragging_my_circle = false;
-            self.my_circle_pos = self.my_circle_pos.clamp(Pos2::new(0., -1.), Pos2::new(1., 1.))
+            if let Some(dragged) = &self.dragged_object {
+                if dragged.1 == AnimationKeyPointField::Pos {
+                    self.points[dragged.0].pos =
+                        self.points[dragged.0].pos.clamp(Vec2::new(0., -1.), Vec2::new(1., 1.));
+                }
+                self.dragged_object = None;
+            }
         }
 
-        if self.dragging_my_circle {
-            self.my_circle_pos += drag_delta;
-        }
+        // handle dragging keys
+        self.update_dragged_object(drag_delta);
 
+        // draw the keys
         for pt in &self.points_for_drawing {
-            ui.painter().circle_filled(pt.pos.to_pos2(), 5.0, Color32::LIGHT_GREEN);
-            ui.painter()
-                .circle_filled(pt.tangent_in.to_pos2(), 3.0, Color32::LIGHT_RED);
-            ui.painter()
-                .circle_filled(pt.tangent_out.to_pos2(), 3.0, Color32::LIGHT_RED);
+            painter.circle_filled(pt.pos.to_pos2(), POINT_RADIUS, POINT_COLOR);
+            painter.circle_filled(pt.tangent_in.to_pos2(), CONTROL_POINT_RADIUS, CONTROL_POINT_COLOR);
+            painter.circle_filled(pt.tangent_out.to_pos2(), CONTROL_POINT_RADIUS, CONTROL_POINT_COLOR);
         }
 
-        if let (Some(ptr_coord), Some(ptr_coord_screen)) = (ptr_coord, ptr_coord_screen) {
-            if !self.dragging_my_circle && self.my_circle_pos.distance(ptr_coord.to_pos2()) < self.circle_radius as f32
-            {
-                response = response.on_hover_cursor(CursorIcon::Grab);
+        // hover cursor
+        if let Some(ptr_coord) = ptr_coord {
+            if let (None, Some(hovered)) = (&self.dragged_object, self.intersected_key(ptr_coord.to_pos2())) {
+                self.hovered_object = Some(hovered);
+                if ui.input(|i| i.modifiers.command | i.modifiers.shift) {
+                    response = response.on_hover_cursor(CursorIcon::Crosshair);
+                } else {
+                    response = response.on_hover_cursor(CursorIcon::Grab);
+                }
             }
 
-            // ui.painter().circle_filled(ptr_coord_screen, 10.0, Color32::LIGHT_GREEN);
-
             ui.label(format!(
-                "in circle {:?}, dragging circle: {}",
-                self.my_circle_pos.distance(ptr_coord.to_pos2()) < self.circle_radius as f32,
-                self.dragging_my_circle
-            ));
-
-            ui.label(format!(
-                "interact pos {:.2},{:.2}, delta: {:.2},{:.2}, ptr coord: {:.2},{:.2}",
-                self.left_click_pos.unwrap_or(Pos2::ZERO).x,
-                self.left_click_pos.unwrap_or(Pos2::ZERO).y,
+                "left click pos {:.2},{:.2}, delta: {:.2},{:.2}, ptr coord: {:.2},{:.2}",
+                left_click_pos.unwrap_or(Pos2::ZERO).x,
+                left_click_pos.unwrap_or(Pos2::ZERO).y,
                 drag_delta.x,
                 drag_delta.y,
                 ptr_coord.x,
@@ -345,19 +379,64 @@ impl LineDemo {
             ));
         }
 
+        if self.hovered_object.is_some() {
+            let mut showing_contex_menu = false;
+            response = response.context_menu(|ui| {
+                showing_contex_menu = true;
+
+                let hovered = self.hovered_object.as_ref().unwrap();
+                match hovered.1 {
+                    AnimationKeyPointField::Pos => {
+                        if ui.button("Delete Key").clicked() {
+                            println!("delete: {:?}", hovered);
+                            ui.close_menu();
+                        }
+                    }
+                    _ => {
+                        let text = if self.points[hovered.0].tangent_locked {
+                            "Unlock Tangent"
+                        } else {
+                            "Lock Tangent"
+                        };
+                        if ui.button(text).clicked() {
+                            self.points[hovered.0].toggle_tangent(hovered.1);
+                            ui.close_menu();
+                        }
+                    }
+                }
+                ui.separator();
+                if ui.button("Close").clicked() {
+                    ui.close_menu();
+                    self.hovered_object = None;
+                }
+            });
+
+            // if the context menu is closed unset the hovered object
+            if !showing_contex_menu {
+                if response.clicked() {
+                    let modifier_down = ui.input(|i| i.modifiers.command | i.modifiers.shift);
+                    if modifier_down {
+                        let hovered = self.hovered_object.unwrap();
+                        self.points[hovered.0].toggle_tangent(hovered.1);
+                    }
+                }
+
+                self.hovered_object = None;
+            }
+        }
+
         let largest_range = {
             let x = bounds.max()[0] - bounds.min()[0];
             let y = bounds.max()[1] - bounds.min()[1];
             x.max(y)
         };
-        // self.circle_radius = largest_range * 0.005;
-        // self.plot_scale = largest_range / ui.available_size_before_wrap().x as f64;
 
         ui.label(format!(
-            "plot bounds: min: {:.02?}, max: {:.02?}, largest_range: {:0.2?}",
+            "plot bounds: min: {:.02?}, max: {:.02?}, largest_range: {:0.2?}, hovered: {:?}",
             bounds.min(),
             bounds.max(),
             largest_range,
+            self.hovered_object
         ));
 
         response
