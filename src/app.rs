@@ -1,9 +1,7 @@
-use egui::{Context, Ui};
-
-use crate::plot_demo;
-use egui_notify::Toasts;
-
 use super::Demo;
+use crate::curve_editor;
+use egui::{Context, Ui};
+use egui_notify::Toasts;
 use std::{collections::BTreeSet, time::Duration};
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
@@ -25,7 +23,7 @@ pub struct App {
 
 impl Default for App {
     fn default() -> Self {
-        let demos: Vec<Box<dyn Demo>> = vec![Box::new(plot_demo::PlotDemo::default())];
+        let demos: Vec<Box<dyn Demo>> = vec![Box::new(curve_editor::CurveEditor::default())];
         let mut open = BTreeSet::new();
         open.insert("🗠 Plot".to_owned());
 

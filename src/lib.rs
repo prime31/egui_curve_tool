@@ -4,8 +4,7 @@ mod app;
 pub use app::App;
 use egui_notify::Toasts;
 
-// windows
-mod plot_demo;
+mod curve_editor;
 
 /// Something to view
 pub trait Demo {

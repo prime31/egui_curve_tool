@@ -5,50 +5,14 @@ use plot::{Corner, Line, LineStyle, Plot};
 
 const POINT_RADIUS: f32 = 5.0;
 const CONTROL_POINT_RADIUS: f32 = 3.0;
-const CIRCLE_CLICK_RADIUS: f32 = 0.02;
+const CIRCLE_CLICK_RADIUS: f32 = 0.03;
 const BOUNDS_OVERSHOOT: f64 = 0.2;
 
 const CURVE_COLOR: Color32 = Color32::DARK_GRAY;
 const POINT_COLOR: Color32 = Color32::LIGHT_GREEN;
 const CONTROL_POINT_COLOR: Color32 = Color32::DARK_GREEN;
+const CONTROL_POINT_UNLOCKED_COLOR: Color32 = Color32::GREEN;
 const CONTROL_POINT_LINE_COLOR: Color32 = Color32::LIGHT_GREEN;
-
-#[derive(PartialEq, Default)]
-pub struct PlotDemo {
-    line_demo: LineDemo,
-}
-
-impl super::Demo for PlotDemo {
-    fn name(&self) -> &'static str {
-        "🗠 Plot"
-    }
-
-    fn show(&mut self, ctx: &Context, open: &mut bool, toasts: &mut Toasts) {
-        Window::new(self.name())
-            .open(open)
-            .default_size(vec2(400.0, 400.0))
-            .min_width(200.)
-            .min_height(300.)
-            // .fixed_size(vec2(400.0, 400.0))
-            .vscroll(true) // todo: temp fix for debug data on bottom
-            .show(ctx, |ui| self.ui(ui, toasts));
-    }
-}
-
-impl PlotDemo {
-    fn ui(&mut self, ui: &mut Ui, toasts: &mut Toasts) {
-        ui.horizontal(|ui| {
-            ui.collapsing("Instructions", |ui| {
-                ui.label("Command/Ctrl click tangent to toggle tangent lock (or right-click for menu).");
-                ui.label("Alt click key to delete (or right click for menu).");
-                ui.label("Alt click empty space to add a key (or right click for menu).");
-            });
-        });
-        ui.separator();
-
-        self.line_demo.ui(ui, toasts);
-    }
-}
 
 #[derive(Default, PartialEq, Clone)]
 struct AnimationKey {
@@ -62,8 +26,8 @@ impl AnimationKey {
     fn new(pos: Vec2) -> AnimationKey {
         AnimationKey {
             pos,
-            tangent_in: Vec2::new(-0.03, 0.0),
-            tangent_out: Vec2::new(0.03, 0.0),
+            tangent_in: Vec2::new(-0.04, 0.0),
+            tangent_out: Vec2::new(0.04, 0.0),
             tangent_locked: true,
         }
     }
@@ -146,7 +110,7 @@ enum AnimationKeyPointField {
 }
 
 #[derive(PartialEq)]
-struct LineDemo {
+pub struct CurveEditor {
     constrain_to_01: bool,
     dragged_object: Option<(usize, AnimationKeyPointField)>,
     hovered_object: Option<(usize, AnimationKeyPointField)>,
@@ -155,7 +119,7 @@ struct LineDemo {
     points_for_drawing: Vec<AnimationKeyPoint>,
 }
 
-impl Default for LineDemo {
+impl Default for CurveEditor {
     fn default() -> Self {
         Self {
             constrain_to_01: false,
@@ -172,24 +136,24 @@ impl Default for LineDemo {
     }
 }
 
-impl LineDemo {
-    fn options_ui(&mut self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
-            ui.style_mut().wrap = Some(false);
-            if ui
-                .toggle_value(&mut self.constrain_to_01, "Constrain to 0 - 1 Range")
-                .changed()
-            {
-                if self.constrain_to_01 {
-                    for pt in &mut self.points {
-                        (*pt).pos.y = pt.pos.y.clamp(0., 1.);
-                    }
-                }
-            }
-            egui::reset_button(ui, self);
-        });
+impl super::Demo for CurveEditor {
+    fn name(&self) -> &'static str {
+        "🗠 Plot"
     }
 
+    fn show(&mut self, ctx: &Context, open: &mut bool, toasts: &mut Toasts) {
+        Window::new(self.name())
+            .open(open)
+            .default_size(vec2(400.0, 400.0))
+            .min_width(200.)
+            .min_height(300.)
+            // .fixed_size(vec2(400.0, 400.0))
+            // .vscroll(true) // todo: temp fix for debug data on bottom
+            .show(ctx, |ui| self.ui(ui, toasts));
+    }
+}
+
+impl CurveEditor {
     fn ensure_drawing_points_capacity(&mut self) {
         if self.points.len() != self.points_for_drawing.len() {
             self.points_for_drawing = self.points.iter().map(|p| p.into()).collect();
@@ -243,9 +207,31 @@ impl LineDemo {
     }
 }
 
-impl LineDemo {
+impl CurveEditor {
     fn ui(&mut self, ui: &mut Ui, toasts: &mut Toasts) -> Response {
-        self.options_ui(ui);
+        ui.horizontal(|ui| {
+            ui.collapsing("Instructions", |ui| {
+                ui.label("Command/Ctrl click tangent to toggle tangent lock (or right-click for menu).");
+                ui.label("Alt click key to delete (or right click for menu).");
+                ui.label("Alt click empty space to add a key (or right click for menu).");
+            });
+        });
+        ui.separator();
+
+        ui.horizontal(|ui| {
+            ui.style_mut().wrap = Some(false);
+            if ui
+                .toggle_value(&mut self.constrain_to_01, "Constrain to 0 - 1 Range")
+                .changed()
+            {
+                if self.constrain_to_01 {
+                    for pt in &mut self.points {
+                        (*pt).pos.y = pt.pos.y.clamp(0., 1.);
+                    }
+                }
+            }
+            egui::reset_button(ui, self);
+        });
 
         self.ensure_drawing_points_capacity();
 
@@ -334,10 +320,15 @@ impl LineDemo {
         self.update_dragged_object(drag_delta);
 
         // draw the keys
-        for pt in &self.points_for_drawing {
+        for (i, pt) in self.points_for_drawing.iter().enumerate() {
+            let ctrl_pt_color = if self.points[i].tangent_locked {
+                CONTROL_POINT_COLOR
+            } else {
+                CONTROL_POINT_UNLOCKED_COLOR
+            };
             painter.circle_filled(pt.pos.to_pos2(), POINT_RADIUS, POINT_COLOR);
-            painter.circle_filled(pt.tangent_in.to_pos2(), CONTROL_POINT_RADIUS, CONTROL_POINT_COLOR);
-            painter.circle_filled(pt.tangent_out.to_pos2(), CONTROL_POINT_RADIUS, CONTROL_POINT_COLOR);
+            painter.circle_filled(pt.tangent_in.to_pos2(), CONTROL_POINT_RADIUS, ctrl_pt_color);
+            painter.circle_filled(pt.tangent_out.to_pos2(), CONTROL_POINT_RADIUS, ctrl_pt_color);
         }
 
         // hover cursor if ptr is in plot rect
@@ -423,14 +414,13 @@ impl LineDemo {
                     if hovered.1 != AnimationKeyPointField::Pos && ui.input(|i| i.modifiers.command) {
                         self.points[hovered.0].toggle_tangent(hovered.1);
                         toasts.info("tangent lock toggled");
-                    } else if hovered.1 == AnimationKeyPointField::Pos
-                        && ui.input(|i| i.modifiers.alt)
-                        && self.points.len() > 2
-                    {
-                        self.points.remove(hovered.0);
-                        toasts.info("key removed");
-                    } else {
-                        toasts.error("cannot remove key");
+                    } else if hovered.1 == AnimationKeyPointField::Pos && ui.input(|i| i.modifiers.alt) {
+                        if self.points.len() > 2 {
+                            self.points.remove(hovered.0);
+                            toasts.info("key removed");
+                        } else {
+                            toasts.error("cannot remove key");
+                        }
                     }
                 }
 
