@@ -1,5 +1,5 @@
 use super::Demo;
-use crate::curve_editor;
+use crate::{curve_editor, syntax_highlighting};
 use egui::{Context, Ui};
 use egui_notify::Toasts;
 use std::{collections::BTreeSet, time::Duration};
@@ -23,7 +23,10 @@ pub struct App {
 
 impl Default for App {
     fn default() -> Self {
-        let demos: Vec<Box<dyn Demo>> = vec![Box::new(curve_editor::CurveEditor::default())];
+        let demos: Vec<Box<dyn Demo>> = vec![
+            Box::new(curve_editor::CurveEditor::default()),
+            Box::new(syntax_highlighting::code_viewer::CodeViewer::default()),
+        ];
         let mut open = BTreeSet::new();
         open.insert("🗠 Plot".to_owned());
 

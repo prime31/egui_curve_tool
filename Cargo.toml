@@ -5,6 +5,9 @@ authors = ["Emil Ernerfeldt <emil.ernerfeldt@gmail.com>"]
 edition = "2021"
 rust-version = "1.65"
 
+[features]
+default = ["syntect", "serde"]
+serde = []
 
 [dependencies]
 egui = "0.21.0"
@@ -12,6 +15,7 @@ eframe = { version = "0.21.0", default-features = false, features = [
     "default_fonts", # Embed the default egui fonts.
     "glow",          # Use the glow rendering backend. Alternative: "wgpu".
     "persistence",   # Enable restoring app state when restarting the app.
+    "serde",
 ] }
 
 # You only need serde if you want app persistence:
@@ -22,6 +26,14 @@ rfd = "0.11"
 
 # toast notifications
 egui-notify = "0.6.0"
+
+# for syntax highlighting code view
+# syntax_highlighting = ["syntect"]
+enum-map = { version = "2", features = ["serde"] }
+syntect = { version = "5", optional = true, default-features = false, features = [
+    "default-fancy"
+] }
+egui_extras = "0.21.0"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

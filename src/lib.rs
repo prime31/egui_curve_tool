@@ -5,6 +5,8 @@ pub use app::App;
 use egui_notify::Toasts;
 
 mod curve_editor;
+#[allow(dead_code)]
+mod syntax_highlighting;
 
 /// Something to view
 pub trait Demo {
