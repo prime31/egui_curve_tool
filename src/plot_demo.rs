@@ -1,11 +1,7 @@
-use std::time::Duration;
-
 use egui::plot::{CoordinatesFormatter, PlotBounds, PlotPoint, PlotUi};
 use egui::*;
 use egui_notify::Toasts;
 use plot::{Corner, Line, LineStyle, Plot};
-
-use crate::App;
 
 const POINT_RADIUS: f32 = 5.0;
 const CONTROL_POINT_RADIUS: f32 = 3.0;
@@ -42,7 +38,6 @@ impl super::Demo for PlotDemo {
 impl PlotDemo {
     fn ui(&mut self, ui: &mut Ui, toasts: &mut Toasts) {
         ui.horizontal(|ui| {
-            egui::reset_button(ui, self);
             ui.collapsing("Instructions", |ui| {
                 ui.label("Command/Ctrl click tangent to toggle tangent lock (or right-click for menu).");
                 ui.label("Alt click key to delete (or right click for menu).");
@@ -152,7 +147,6 @@ enum AnimationKeyPointField {
 
 #[derive(PartialEq)]
 struct LineDemo {
-    circle_radius: f64,
     constrain_to_01: bool,
     dragged_object: Option<(usize, AnimationKeyPointField)>,
     hovered_object: Option<(usize, AnimationKeyPointField)>,
@@ -164,7 +158,6 @@ struct LineDemo {
 impl Default for LineDemo {
     fn default() -> Self {
         Self {
-            circle_radius: 0.05,
             constrain_to_01: false,
             dragged_object: None,
             hovered_object: None,
@@ -181,22 +174,19 @@ impl Default for LineDemo {
 
 impl LineDemo {
     fn options_ui(&mut self, ui: &mut Ui) {
-        let Self {
-            circle_radius,
-            constrain_to_01,
-            ..
-        } = self;
-
         ui.horizontal(|ui| {
             ui.style_mut().wrap = Some(false);
-            ui.add(egui::Slider::new(circle_radius, 1.0..=1000.0));
-            if ui.toggle_value(constrain_to_01, "0 - 1 Range").changed() {
-                if *constrain_to_01 {
+            if ui
+                .toggle_value(&mut self.constrain_to_01, "Constrain to 0 - 1 Range")
+                .changed()
+            {
+                if self.constrain_to_01 {
                     for pt in &mut self.points {
                         (*pt).pos.y = pt.pos.y.clamp(0., 1.);
                     }
                 }
             }
+            egui::reset_button(ui, self);
         });
     }
 
