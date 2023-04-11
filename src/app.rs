@@ -1,27 +1,19 @@
 use egui::{Context, Ui};
 
-use crate::{bezier_curve_editor, context_menu, curve_editor, paint_bezier, plot_demo};
+use crate::plot_demo;
 use egui_notify::Toasts;
 
 use super::Demo;
-use std::{
-    collections::BTreeSet,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::{collections::BTreeSet, time::Duration};
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
-pub struct TemplateApp {
-    // Example stuff:
-    label: String,
-
+pub struct App {
     #[serde(skip)]
     picked_path: Option<String>,
     #[serde(skip)]
     dropped_files: Vec<egui::DroppedFile>,
-
-    value: f32,
 
     #[serde(skip)]
     demos: Vec<Box<dyn Demo>>,
@@ -31,23 +23,15 @@ pub struct TemplateApp {
     toasts: Toasts,
 }
 
-impl Default for TemplateApp {
+impl Default for App {
     fn default() -> Self {
-        let demos: Vec<Box<dyn Demo>> = vec![
-            Box::new(paint_bezier::PaintBezier::default()),
-            Box::new(context_menu::ContextMenus::default()),
-            Box::new(plot_demo::PlotDemo::default()),
-            Box::new(curve_editor::CurveEditor::default()),
-            Box::new(bezier_curve_editor::BezierCurveEditor::default()),
-        ];
+        let demos: Vec<Box<dyn Demo>> = vec![Box::new(plot_demo::PlotDemo::default())];
         let mut open = BTreeSet::new();
         open.insert("🗠 Plot".to_owned());
 
         Self {
-            label: "foobar".into(),
             picked_path: None,
             dropped_files: vec![],
-            value: 2.0,
             demos,
             open,
             toasts: Toasts::default(),
@@ -55,14 +39,13 @@ impl Default for TemplateApp {
     }
 }
 
-impl TemplateApp {
+impl App {
     /// Called once before the first frame.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // This is also where you can customize the look and feel of egui using
         // `cc.egui_ctx.set_visuals` and `cc.egui_ctx.set_fonts`.
 
-        // Load previous app state (if any).
-        // Note that you must enable the `persistence` feature for this to work.
+        // Load previous app state (if any). Note that you must enable the `persistence` feature for this to work.
         if let Some(storage) = cc.storage {
             return eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
         }
@@ -74,8 +57,8 @@ impl TemplateApp {
         let Self { demos, open, .. } = self;
         for demo in demos {
             let mut is_open = open.contains(demo.name());
-            demo.show(ctx, &mut is_open);
-            TemplateApp::set_open(open, demo.name(), is_open);
+            demo.show(ctx, &mut is_open, &mut self.toasts);
+            App::set_open(open, demo.name(), is_open);
         }
     }
 
@@ -84,7 +67,7 @@ impl TemplateApp {
         for demo in demos {
             let mut is_open = open.contains(demo.name());
             ui.toggle_value(&mut is_open, demo.name());
-            TemplateApp::set_open(open, demo.name(), is_open);
+            App::set_open(open, demo.name(), is_open);
         }
     }
 
@@ -105,7 +88,7 @@ impl TemplateApp {
     }
 }
 
-impl eframe::App for TemplateApp {
+impl eframe::App for App {
     /// Called by the framework to save state before shutdown.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, eframe::APP_KEY, self);
@@ -114,93 +97,45 @@ impl eframe::App for TemplateApp {
     /// Called each time the UI needs repainting, which may be many times per second.
     /// Put your widgets into a `SidePanel`, `TopPanel`, `CentralPanel`, `Window` or `Area`.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        ctx.request_repaint_after(std::time::Duration::from_secs_f32(self.value));
+        ctx.request_repaint_after(std::time::Duration::from_secs_f32(10.0));
 
         self.toasts.show(ctx);
         self.windows(ctx);
-
-        // Examples of how to create different panels and windows.
-        // Pick whichever suits you.
-        // Tip: a good default choice is to just keep the `CentralPanel`.
-        // For inspiration and more examples, go to https://emilk.github.io/egui
 
         #[cfg(not(target_arch = "wasm32"))] // no File->Quit on web pages!
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             // The top panel is often a good place for a menu bar:
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if ui.button("Open...").clicked() {
+                        if let Some(path) = rfd::FileDialog::new().pick_file() {
+                            self.picked_path = Some(path.display().to_string());
+                        }
+                        ui.close_menu();
+                    }
                     if ui.button("Quit").clicked() {
                         _frame.close();
+                    }
+                });
+                ui.menu_button("View", |ui| {
+                    if ui.button("Organize Windows").clicked() {
+                        ui.ctx().memory_mut(|mem| mem.reset_areas());
                     }
                 });
             });
         });
 
         egui::SidePanel::left("side_panel").show(ctx, |ui| {
-            ui.heading("Side Panel");
-
-            ui.horizontal(|ui| {
-                ui.label("Write something: ");
-                ui.text_edit_singleline(&mut self.label);
-            });
-
-            ui.add(egui::Slider::new(&mut self.value, 0.0..=10.0).text("value"));
-            if ui.button("Increment").clicked() {
-                (*self).value += 1.0;
-                self.show_toast("fuck you", 3);
-            }
-
-            #[cfg(not(target_arch = "wasm32"))]
-            ui.label(format!(
-                "Repainting the UI each frame. FPS: {:?}",
-                SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis()
-            ));
-
             ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |inner_ui| {
                 inner_ui.separator();
-                inner_ui.label("Windows");
+                inner_ui.heading("Open Windows");
                 self.checkboxes(inner_ui);
-
-                inner_ui.separator();
-                if inner_ui.button("Organize windows").clicked() {
-                    inner_ui.ctx().memory_mut(|mem| mem.reset_areas());
-                }
-            });
-
-            ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 0.0;
-                    ui.label("powered by ");
-                    ui.hyperlink_to("egui", "https://github.com/emilk/egui");
-                    ui.label(" and ");
-                    ui.hyperlink_to("eframe", "https://github.com/emilk/egui/tree/master/crates/eframe");
-                    ui.label(".");
-                });
             });
         });
 
         // The central panel the region left after adding TopPanel's and SidePanel's
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("eframe template");
-            ui.hyperlink("https://github.com/emilk/eframe_template");
-            ui.add(egui::github_link_file!(
-                "https://github.com/emilk/eframe_template/blob/master/",
-                "Source code."
-            ));
-            egui::warn_if_debug_build(ui);
-
-            #[cfg(not(target_arch = "wasm32"))]
-            if ui.button("Open file…").clicked() {
-                if let Some(path) = rfd::FileDialog::new().pick_file() {
-                    self.picked_path = Some(path.display().to_string());
-                }
-            }
-            if let Some(picked_path) = &self.picked_path {
-                ui.horizontal(|ui| {
-                    ui.label("Picked file:");
-                    ui.monospace(picked_path);
-                });
-            }
             // Show dropped files (if any):
             if !self.dropped_files.is_empty() {
                 ui.group(|ui| {

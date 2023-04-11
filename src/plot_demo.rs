@@ -1,6 +1,11 @@
+use std::time::Duration;
+
 use egui::plot::{CoordinatesFormatter, PlotBounds, PlotPoint, PlotUi};
 use egui::*;
+use egui_notify::Toasts;
 use plot::{Corner, Line, LineStyle, Plot};
+
+use crate::App;
 
 const POINT_RADIUS: f32 = 5.0;
 const CONTROL_POINT_RADIUS: f32 = 3.0;
@@ -22,8 +27,7 @@ impl super::Demo for PlotDemo {
         "🗠 Plot"
     }
 
-    fn show(&mut self, ctx: &Context, open: &mut bool) {
-        use super::View as _;
+    fn show(&mut self, ctx: &Context, open: &mut bool, toasts: &mut Toasts) {
         Window::new(self.name())
             .open(open)
             .default_size(vec2(400.0, 400.0))
@@ -31,12 +35,12 @@ impl super::Demo for PlotDemo {
             .min_height(300.)
             // .fixed_size(vec2(400.0, 400.0))
             .vscroll(true) // todo: temp fix for debug data on bottom
-            .show(ctx, |ui| self.ui(ui));
+            .show(ctx, |ui| self.ui(ui, toasts));
     }
 }
 
-impl super::View for PlotDemo {
-    fn ui(&mut self, ui: &mut Ui) {
+impl PlotDemo {
+    fn ui(&mut self, ui: &mut Ui, toasts: &mut Toasts) {
         ui.horizontal(|ui| {
             egui::reset_button(ui, self);
             ui.collapsing("Instructions", |ui| {
@@ -47,7 +51,7 @@ impl super::View for PlotDemo {
         });
         ui.separator();
 
-        self.line_demo.ui(ui);
+        self.line_demo.ui(ui, toasts);
     }
 }
 
@@ -250,7 +254,7 @@ impl LineDemo {
 }
 
 impl LineDemo {
-    fn ui(&mut self, ui: &mut Ui) -> Response {
+    fn ui(&mut self, ui: &mut Ui, toasts: &mut Toasts) -> Response {
         self.options_ui(ui);
 
         self.ensure_drawing_points_capacity();
@@ -274,7 +278,7 @@ impl LineDemo {
 
         let InnerResponse {
             mut response,
-            inner: (left_click_pos, drag_delta, ptr_coord, ptr_coord_screen, bounds),
+            inner: (left_click_pos, drag_delta, ptr_coord, _ptr_coord_screen, bounds),
         } = plot.show(ui, |plot_ui| {
             // draw the curve
             plot_ui.line(self.curve());
@@ -410,6 +414,7 @@ impl LineDemo {
                         };
                         if ui.button(text).clicked() {
                             self.points[hovered.0].toggle_tangent(hovered.1);
+                            toasts.info("tangent lock toggled");
                             ui.close_menu();
                         }
                     }
@@ -427,11 +432,15 @@ impl LineDemo {
                     let hovered = self.hovered_object.unwrap();
                     if hovered.1 != AnimationKeyPointField::Pos && ui.input(|i| i.modifiers.command) {
                         self.points[hovered.0].toggle_tangent(hovered.1);
+                        toasts.info("tangent lock toggled");
                     } else if hovered.1 == AnimationKeyPointField::Pos
                         && ui.input(|i| i.modifiers.alt)
                         && self.points.len() > 2
                     {
                         self.points.remove(hovered.0);
+                        toasts.info("key removed");
+                    } else {
+                        toasts.error("cannot remove key");
                     }
                 }
 
@@ -448,6 +457,7 @@ impl LineDemo {
 
                 if ui.button("Add Key Here").clicked() {
                     self.add_key(self.right_click_pos.unwrap().to_vec2());
+                    toasts.info("key added");
                     ui.close_menu();
                 }
                 ui.separator();
@@ -462,6 +472,7 @@ impl LineDemo {
                 // alt click to add point
                 if response.clicked() && ui.input(|i| i.modifiers.alt) {
                     self.add_key(ptr_coord.unwrap().to_vec2());
+                    toasts.info("key added");
                 }
             }
         }

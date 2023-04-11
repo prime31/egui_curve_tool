@@ -1,13 +1,10 @@
 #![warn(clippy::all, rust_2018_idioms)]
 
 mod app;
-pub use app::TemplateApp;
+pub use app::App;
+use egui_notify::Toasts;
 
 // windows
-mod bezier_curve_editor;
-mod context_menu;
-mod curve_editor;
-mod paint_bezier;
 mod plot_demo;
 
 /// Something to view in the demo windows
@@ -21,5 +18,5 @@ pub trait Demo {
     fn name(&self) -> &'static str;
 
     /// Show windows, etc
-    fn show(&mut self, ctx: &egui::Context, open: &mut bool);
+    fn show(&mut self, ctx: &egui::Context, open: &mut bool, app: &mut Toasts);
 }
