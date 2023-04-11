@@ -13,6 +13,7 @@ const POINT_COLOR: Color32 = Color32::LIGHT_GREEN;
 const CONTROL_POINT_COLOR: Color32 = Color32::DARK_GREEN;
 const CONTROL_POINT_UNLOCKED_COLOR: Color32 = Color32::GREEN;
 const CONTROL_POINT_LINE_COLOR: Color32 = Color32::LIGHT_GREEN;
+const HOVERED_KEY_STROKE_COLOR: Color32 = Color32::LIGHT_RED;
 
 #[derive(Default, PartialEq, Clone)]
 struct AnimationKey {
@@ -41,18 +42,26 @@ impl AnimationKey {
     }
 
     fn intersects(&self, ptr_coord: Pos2) -> Option<AnimationKeyPointField> {
-        if self.pos.to_pos2().distance(ptr_coord) < CIRCLE_CLICK_RADIUS {
-            return Some(AnimationKeyPointField::Pos);
+        let mut nearest_dist = f32::MAX;
+        let mut nearest = None;
+
+        let mut dist = self.pos.to_pos2().distance(ptr_coord);
+        if dist < CIRCLE_CLICK_RADIUS && dist < nearest_dist {
+            nearest_dist = dist;
+            nearest = Some(AnimationKeyPointField::Pos);
         }
 
-        if self.tangent_in_screen().distance(ptr_coord) < CIRCLE_CLICK_RADIUS {
-            return Some(AnimationKeyPointField::TanIn);
+        dist = self.tangent_in_screen().distance(ptr_coord);
+        if dist < CIRCLE_CLICK_RADIUS && dist < nearest_dist {
+            nearest_dist = dist;
+            nearest = Some(AnimationKeyPointField::TanIn);
         }
 
-        if self.tangent_out_screen().distance(ptr_coord) < CIRCLE_CLICK_RADIUS {
-            return Some(AnimationKeyPointField::TanOut);
+        dist = self.tangent_out_screen().distance(ptr_coord);
+        if dist < CIRCLE_CLICK_RADIUS && dist < nearest_dist {
+            nearest = Some(AnimationKeyPointField::TanOut);
         }
-        return None;
+        return nearest;
     }
 
     fn translate(&mut self, key_field: &AnimationKeyPointField, delta: Vec2) {
@@ -163,6 +172,13 @@ impl CurveEditor {
     fn intersected_key(&self, ptr_coord: Pos2) -> Option<(usize, AnimationKeyPointField)> {
         for (i, pt) in self.points.iter().enumerate() {
             if let Some(key_point_field) = pt.intersects(ptr_coord) {
+                // filter out first/last tangent on first/last element
+                if (i == 0 && key_point_field == AnimationKeyPointField::TanIn)
+                    || (i == self.points.len() - 1 && key_point_field == AnimationKeyPointField::TanOut)
+                {
+                    continue;
+                }
+
                 return Some((i, key_point_field));
             }
         }
@@ -189,20 +205,62 @@ impl CurveEditor {
         }
     }
 
-    fn curve(&self) -> Line {
+    fn draw_curve(&self) -> Line {
         let pts: Vec<_> = self.points.iter().map(|f| [f.pos.x as f64, f.pos.y as f64]).collect();
         Line::new(pts).color(CURVE_COLOR).style(LineStyle::Solid)
     }
 
-    fn tangent_lines(&self, plot_ui: &mut PlotUi) {
-        for pt in &self.points {
+    fn draw_tangent_lines(&self, plot_ui: &mut PlotUi) {
+        for (i, pt) in self.points.iter().enumerate() {
+            let mut pts = Vec::with_capacity(3);
+
             let pos = [pt.pos.x as f64, pt.pos.y as f64];
-            let pts = vec![
-                [pos[0] + pt.tangent_in.x as f64, pos[1] + pt.tangent_in.y as f64],
-                pos,
-                [pos[0] + pt.tangent_out.x as f64, pos[1] + pt.tangent_out.y as f64],
-            ];
+            if i > 0 {
+                pts.push([pos[0] + pt.tangent_in.x as f64, pos[1] + pt.tangent_in.y as f64]);
+            }
+            pts.push(pos);
+
+            if i < self.points.len() - 1 {
+                pts.push([pos[0] + pt.tangent_out.x as f64, pos[1] + pt.tangent_out.y as f64]);
+            }
+
             plot_ui.line(Line::new(pts).color(CONTROL_POINT_LINE_COLOR));
+        }
+    }
+
+    fn draw_keys(&self, painter: Painter) {
+        for (i, pt) in self.points_for_drawing.iter().enumerate() {
+            let ctrl_pt_color = if self.points[i].tangent_locked {
+                CONTROL_POINT_COLOR
+            } else {
+                CONTROL_POINT_UNLOCKED_COLOR
+            };
+
+            // dont draw both tangents for first or last keys
+            if i > 0 {
+                painter.circle_filled(pt.tangent_in.to_pos2(), CONTROL_POINT_RADIUS, ctrl_pt_color);
+            }
+
+            painter.circle_filled(pt.pos.to_pos2(), POINT_RADIUS, POINT_COLOR);
+
+            if i < self.points_for_drawing.len() - 1 {
+                painter.circle_filled(pt.tangent_out.to_pos2(), CONTROL_POINT_RADIUS, ctrl_pt_color);
+            }
+
+            if let Some(hovered) = self.hovered_object {
+                if hovered.0 == i {
+                    let stroke = Stroke::new(2.0, HOVERED_KEY_STROKE_COLOR);
+                    match hovered.1 {
+                        AnimationKeyPointField::Pos => painter.circle_stroke(pt.pos.to_pos2(), POINT_RADIUS, stroke),
+                        AnimationKeyPointField::TanIn => {
+                            painter.circle_stroke(pt.tangent_in.to_pos2(), CONTROL_POINT_RADIUS, stroke)
+                        }
+                        AnimationKeyPointField::TanOut => {
+                            painter.circle_stroke(pt.tangent_out.to_pos2(), CONTROL_POINT_RADIUS, stroke)
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -257,8 +315,8 @@ impl CurveEditor {
             inner: (left_click_pos, drag_delta, ptr_coord, _ptr_coord_screen, bounds),
         } = plot.show(ui, |plot_ui| {
             // draw the curve
-            plot_ui.line(self.curve());
-            self.tangent_lines(plot_ui);
+            plot_ui.line(self.draw_curve());
+            self.draw_tangent_lines(plot_ui);
 
             let y_min = if self.constrain_to_01 { 0. } else { -1. };
             let min_bounds = [0. - BOUNDS_OVERSHOOT, y_min - BOUNDS_OVERSHOOT];
@@ -272,7 +330,7 @@ impl CurveEditor {
                 None
             });
 
-            // convert to screen spa
+            // convert to screen space for drawing
             for (i, pt) in self.points.iter().enumerate() {
                 self.points_for_drawing[i].pos = plot_ui.screen_from_plot(PlotPoint::new(pt.pos.x, pt.pos.y)).to_vec2();
                 self.points_for_drawing[i].tangent_in = plot_ui
@@ -296,8 +354,6 @@ impl CurveEditor {
             )
         });
 
-        let painter = ui.painter_at(response.rect);
-
         // check for click/drag
         if left_click_pos.is_some() && ptr_coord.is_some() {
             let ptr_coord = ptr_coord.unwrap().to_pos2();
@@ -319,18 +375,6 @@ impl CurveEditor {
         // handle dragging keys
         self.update_dragged_object(drag_delta);
 
-        // draw the keys
-        for (i, pt) in self.points_for_drawing.iter().enumerate() {
-            let ctrl_pt_color = if self.points[i].tangent_locked {
-                CONTROL_POINT_COLOR
-            } else {
-                CONTROL_POINT_UNLOCKED_COLOR
-            };
-            painter.circle_filled(pt.pos.to_pos2(), POINT_RADIUS, POINT_COLOR);
-            painter.circle_filled(pt.tangent_in.to_pos2(), CONTROL_POINT_RADIUS, ctrl_pt_color);
-            painter.circle_filled(pt.tangent_out.to_pos2(), CONTROL_POINT_RADIUS, ctrl_pt_color);
-        }
-
         // hover cursor if ptr is in plot rect
         if let Some(mut ptr_coord) = ptr_coord {
             if let Some(right_click_pos) = self.right_click_pos {
@@ -344,7 +388,7 @@ impl CurveEditor {
                 } else if hovered.1 == AnimationKeyPointField::Pos && ui.input(|i| i.modifiers.alt) {
                     response = response.on_hover_cursor(CursorIcon::NoDrop);
                 } else {
-                    response = response.on_hover_cursor(CursorIcon::Grab);
+                    // response = response.on_hover_cursor(CursorIcon::Grab);
                 }
             } else if ui.input(|i| i.modifiers.alt) {
                 response = response.on_hover_cursor(CursorIcon::Copy);
@@ -360,6 +404,9 @@ impl CurveEditor {
                 ptr_coord.y
             ));
         }
+
+        // draw the keys
+        self.draw_keys(ui.painter_at(response.rect));
 
         if self.hovered_object.is_some() {
             let mut showing_contex_menu = false;
@@ -424,7 +471,7 @@ impl CurveEditor {
                     }
                 }
 
-                self.hovered_object = None;
+                // self.hovered_object = None;
             }
         } else {
             let mut showing_contex_menu = false;
@@ -471,7 +518,7 @@ impl CurveEditor {
             self.hovered_object,
             self.right_click_pos
         ));
-
+        self.hovered_object = None;
         response
     }
 }
