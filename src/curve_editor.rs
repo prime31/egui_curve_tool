@@ -27,8 +27,8 @@ impl AnimationKey {
     fn new(pos: Vec2) -> AnimationKey {
         AnimationKey {
             pos,
-            tangent_in: Vec2::new(-0.04, 0.0),
-            tangent_out: Vec2::new(0.04, 0.0),
+            tangent_in: vec2(-0.04, 0.0),
+            tangent_out: vec2(0.04, 0.0),
             tangent_locked: true,
         }
     }
@@ -136,9 +136,9 @@ impl Default for CurveEditor {
             hovered_object: None,
             right_click_pos: None,
             points: vec![
-                AnimationKey::new(Vec2::new(0.0, 0.0)),
-                AnimationKey::new(Vec2::new(0.5, 0.5)),
-                AnimationKey::new(Vec2::new(1.0, 1.0)),
+                AnimationKey::new(vec2(0.0, 0.0)),
+                AnimationKey::new(vec2(0.5, 0.5)),
+                AnimationKey::new(vec2(1.0, 1.0)),
             ],
             points_for_drawing: vec![],
         }
@@ -187,7 +187,7 @@ impl CurveEditor {
 
     fn add_key(&mut self, pos: Vec2) {
         let y_min = if self.constrain_to_01 { 0. } else { -1. };
-        let new_pos = pos.clamp(Vec2::new(0., y_min), Vec2::new(1., 1.));
+        let new_pos = pos.clamp(vec2(0., y_min), vec2(1., 1.));
 
         self.points.push(AnimationKey::new(new_pos));
         self.points_for_drawing.push(self.points.last().unwrap().into());
@@ -301,7 +301,7 @@ impl CurveEditor {
             .allow_double_click_reset(false)
             .show_x(false)
             .show_y(false)
-            .min_size(Vec2::new(128., 128.))
+            .min_size(vec2(128., 128.))
             // .data_aspect(1.0)
             // .view_aspect(1.0)
             .height(ui.available_height() - 151.); // magic number for 3 lines of logs on the bottom
@@ -366,7 +366,7 @@ impl CurveEditor {
                     let y_min = if self.constrain_to_01 { 0. } else { -1. };
                     self.points[dragged.0].pos = self.points[dragged.0]
                         .pos
-                        .clamp(Vec2::new(0., y_min), Vec2::new(1., 1.));
+                        .clamp(vec2(0., y_min), vec2(1., 1.));
                 }
                 self.dragged_object = None;
             }
