@@ -5,6 +5,7 @@ use plot::{Corner, Line, LineStyle, Plot};
 const POINT_RADIUS: f32 = 5.0;
 const CONTROL_POINT_RADIUS: f32 = 3.0;
 const CIRCLE_CLICK_RADIUS: f32 = 0.02;
+const BOUNDS_OVERSHOOT: f64 = 0.2;
 
 const CURVE_COLOR: Color32 = Color32::DARK_GRAY;
 const POINT_COLOR: Color32 = Color32::LIGHT_GREEN;
@@ -39,15 +40,9 @@ impl super::View for PlotDemo {
         ui.horizontal(|ui| {
             egui::reset_button(ui, self);
             ui.collapsing("Instructions", |ui| {
-                ui.label("Pan by dragging, or scroll (+ shift = horizontal).");
-                ui.label("Box zooming: Right click to zoom in and zoom out using a selection.");
-                if cfg!(target_arch = "wasm32") {
-                    ui.label("Zoom with ctrl / ⌘ + pointer wheel, or with pinch gesture.");
-                } else if cfg!(target_os = "macos") {
-                    ui.label("Zoom with ctrl / ⌘ + scroll.");
-                } else {
-                    ui.label("Zoom with ctrl + scroll.");
-                }
+                ui.label("Command/Ctrl click tangent to toggle tangent lock (or right-click for menu).");
+                ui.label("Alt click key to delete (or right click for menu).");
+                ui.label("Alt click empty space to add a key (or right click for menu).");
             });
         });
         ui.separator();
@@ -189,7 +184,13 @@ impl LineDemo {
         ui.horizontal(|ui| {
             ui.style_mut().wrap = Some(false);
             ui.add(egui::Slider::new(circle_radius, 1.0..=1000.0));
-            ui.toggle_value(constrain_to_01, "0 - 1 Range");
+            if ui.toggle_value(constrain_to_01, "0 - 1 Range").changed() {
+                if *constrain_to_01 {
+                    for pt in &mut self.points {
+                        (*pt).pos.y = pt.pos.y.clamp(0., 1.);
+                    }
+                }
+            }
         });
     }
 
@@ -249,10 +250,10 @@ impl LineDemo {
         self.ensure_drawing_points_capacity();
 
         let mut plot = Plot::new("lines_demo")
-            .allow_drag(self.dragged_object.is_none())
-            .allow_scroll(self.dragged_object.is_none())
-            .allow_zoom(self.dragged_object.is_none())
-            .allow_boxed_zoom(self.dragged_object.is_none())
+            .allow_drag(false && self.dragged_object.is_none())
+            .allow_scroll(false && self.dragged_object.is_none())
+            .allow_zoom(false && self.dragged_object.is_none())
+            .allow_boxed_zoom(false && self.dragged_object.is_none())
             .allow_double_click_reset(false)
             .show_x(false)
             .show_y(false)
@@ -273,29 +274,9 @@ impl LineDemo {
             plot_ui.line(self.curve());
             self.tangent_lines(plot_ui);
 
-            // clamp x min of the graph
-            let y_min = if self.constrain_to_01 { -0.1 } else { -1.1 };
-            let mut min_bounds = plot_ui.plot_bounds().min();
-            if min_bounds[0] != -0.1 || min_bounds[1] < y_min {
-                min_bounds[0] = -0.1;
-                min_bounds[1] = min_bounds[1].clamp(y_min, 100.0);
-
-                let mut max_bounds = plot_ui.plot_bounds().max();
-                let bounds = plot_ui.plot_bounds();
-                max_bounds[0] -= bounds.min()[0] - min_bounds[0];
-                max_bounds[1] -= bounds.min()[1] - min_bounds[1];
-
-                plot_ui.set_plot_bounds(PlotBounds::from_min_max(min_bounds, max_bounds));
-            }
-
-            // clamp y max of the graph
-            let mut max_bounds = plot_ui.plot_bounds().max();
-            if max_bounds[1] > 1.1 {
-                max_bounds[1] = max_bounds[1].clamp(y_min, 1.1);
-                plot_ui.set_plot_bounds(PlotBounds::from_min_max(min_bounds, max_bounds));
-            }
-
-            max_bounds[0] = 1.1;
+            let y_min = if self.constrain_to_01 { 0. } else { -1. };
+            let min_bounds = [0. - BOUNDS_OVERSHOOT, y_min - BOUNDS_OVERSHOOT];
+            let max_bounds = [1. + BOUNDS_OVERSHOOT, 1. + BOUNDS_OVERSHOOT];
             plot_ui.set_plot_bounds(PlotBounds::from_min_max(min_bounds, max_bounds));
 
             let left_click_pos = plot_ui.ctx().input(|i| {
@@ -340,8 +321,10 @@ impl LineDemo {
         if response.drag_released() {
             if let Some(dragged) = &self.dragged_object {
                 if dragged.1 == AnimationKeyPointField::Pos {
-                    self.points[dragged.0].pos =
-                        self.points[dragged.0].pos.clamp(Vec2::new(0., -1.), Vec2::new(1., 1.));
+                    let y_min = if self.constrain_to_01 { 0. } else { -1. };
+                    self.points[dragged.0].pos = self.points[dragged.0]
+                        .pos
+                        .clamp(Vec2::new(0., y_min), Vec2::new(1., 1.));
                 }
                 self.dragged_object = None;
             }
@@ -357,12 +340,14 @@ impl LineDemo {
             painter.circle_filled(pt.tangent_out.to_pos2(), CONTROL_POINT_RADIUS, CONTROL_POINT_COLOR);
         }
 
-        // hover cursor
+        // hover cursor if ptr is in plot rect
         if let Some(ptr_coord) = ptr_coord {
             if let (None, Some(hovered)) = (&self.dragged_object, self.intersected_key(ptr_coord.to_pos2())) {
                 self.hovered_object = Some(hovered);
-                if ui.input(|i| i.modifiers.command | i.modifiers.shift) {
+                if hovered.1 != AnimationKeyPointField::Pos && ui.input(|i| i.modifiers.command) {
                     response = response.on_hover_cursor(CursorIcon::Crosshair);
+                } else if hovered.1 == AnimationKeyPointField::Pos && ui.input(|i| i.modifiers.alt) {
+                    response = response.on_hover_cursor(CursorIcon::NoDrop);
                 } else {
                     response = response.on_hover_cursor(CursorIcon::Grab);
                 }
@@ -387,9 +372,18 @@ impl LineDemo {
                 let hovered = self.hovered_object.as_ref().unwrap();
                 match hovered.1 {
                     AnimationKeyPointField::Pos => {
-                        if ui.button("Delete Key").clicked() {
-                            println!("delete: {:?}", hovered);
-                            ui.close_menu();
+                        if ui
+                            .add_enabled_ui(self.points.len() > 2, |ui| {
+                                if ui.button("Delete Key").clicked() {
+                                    ui.close_menu();
+                                    return true;
+                                }
+                                false
+                            })
+                            .inner
+                        {
+                            self.points.remove(hovered.0);
+                            self.hovered_object = None;
                         }
                     }
                     _ => {
@@ -411,18 +405,33 @@ impl LineDemo {
                 }
             });
 
-            // if the context menu is closed unset the hovered object
+            // if the context menu is closed unset the hovered object and handle clicks
             if !showing_contex_menu {
                 if response.clicked() {
-                    let modifier_down = ui.input(|i| i.modifiers.command | i.modifiers.shift);
-                    if modifier_down {
-                        let hovered = self.hovered_object.unwrap();
+                    let hovered = self.hovered_object.unwrap();
+                    if hovered.1 != AnimationKeyPointField::Pos && ui.input(|i| i.modifiers.command) {
                         self.points[hovered.0].toggle_tangent(hovered.1);
+                    } else if hovered.1 == AnimationKeyPointField::Pos
+                        && ui.input(|i| i.modifiers.alt)
+                        && self.points.len() > 2
+                    {
+                        self.points.remove(hovered.0);
                     }
                 }
 
                 self.hovered_object = None;
             }
+        } else {
+            response = response.context_menu(|ui| {
+                if ui.button("Add Key Here").clicked() {
+                    println!("pos to add: {:?}", ptr_coord);
+                    ui.close_menu();
+                }
+                ui.separator();
+                if ui.button("Close").clicked() {
+                    ui.close_menu();
+                }
+            });
         }
 
         let largest_range = {
