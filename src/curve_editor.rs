@@ -3,14 +3,15 @@ use egui::*;
 use egui_notify::Toasts;
 use plot::{Corner, Line, LineStyle, Plot};
 
-use crate::hermite;
+use crate::splines;
 
 const POINT_RADIUS: f32 = 5.0;
 const CONTROL_POINT_RADIUS: f32 = 3.0;
 const CIRCLE_CLICK_RADIUS: f32 = 0.03;
 const BOUNDS_OVERSHOOT: f64 = 0.2;
+const TANGENT_LENGTH: f32 = 0.04;
 
-const CURVE_COLOR: Color32 = Color32::DARK_GRAY;
+const CURVE_COLOR: Color32 = Color32::LIGHT_BLUE;
 const POINT_COLOR: Color32 = Color32::LIGHT_GREEN;
 const CONTROL_POINT_COLOR: Color32 = Color32::DARK_GREEN;
 const CONTROL_POINT_UNLOCKED_COLOR: Color32 = Color32::GREEN;
@@ -29,8 +30,8 @@ impl AnimationKey {
     fn new(pos: Vec2) -> AnimationKey {
         AnimationKey {
             pos,
-            tangent_in: vec2(-0.04, 0.0),
-            tangent_out: vec2(0.04, 0.0),
+            tangent_in: vec2(-TANGENT_LENGTH, 0.0),
+            tangent_out: vec2(TANGENT_LENGTH, 0.0),
             tangent_locked: true,
         }
     }
@@ -72,13 +73,13 @@ impl AnimationKey {
             AnimationKeyPointField::TanIn => {
                 self.tangent_in += delta;
                 if self.tangent_locked {
-                    self.tangent_out -= delta;
+                    self.tangent_out = -self.tangent_in;
                 }
             }
             AnimationKeyPointField::TanOut => {
                 self.tangent_out += delta;
                 if self.tangent_locked {
-                    self.tangent_in -= delta;
+                    self.tangent_in = -self.tangent_out;
                 }
             }
         }
@@ -123,6 +124,7 @@ enum AnimationKeyPointField {
 #[derive(PartialEq)]
 pub struct CurveEditor {
     constrain_to_01: bool,
+    curve_resolution: usize,
     dragged_object: Option<(usize, AnimationKeyPointField)>,
     hovered_object: Option<(usize, AnimationKeyPointField)>,
     right_click_pos: Option<Pos2>,
@@ -134,6 +136,7 @@ impl Default for CurveEditor {
     fn default() -> Self {
         Self {
             constrain_to_01: false,
+            curve_resolution: 50,
             dragged_object: None,
             hovered_object: None,
             right_click_pos: None,
@@ -199,6 +202,7 @@ impl CurveEditor {
     fn update_dragged_object(&mut self, drag_delta: Vec2) {
         if let Some(ref mut dragged) = self.dragged_object {
             self.points[dragged.0].translate(&dragged.1, drag_delta);
+
             if dragged.1 == AnimationKeyPointField::Pos {
                 let key = self.points[dragged.0].clone();
                 self.points.sort_by(|a, b| a.pos.x.partial_cmp(&b.pos.x).unwrap());
@@ -209,12 +213,11 @@ impl CurveEditor {
 
     fn draw_curve(&self) -> Line {
         let mut pts: Vec<_> = self.points.iter().map(|f| [f.pos.x as f64, f.pos.y as f64]).collect();
-        // Line::new(pts).color(CURVE_COLOR).style(LineStyle::Solid)
 
         pts.clear();
-        for i in 0..=100 {
-            let t = i as f32 / 100.;
-            pts.push([t as f64, hermite::evaluate(&self.points, t) as f64]);
+        for i in 0..=self.curve_resolution {
+            let t = i as f32 / self.curve_resolution as f32;
+            pts.push([t as f64, splines::evaluate(&self.points, t) as f64]);
         }
         Line::new(pts).color(CURVE_COLOR).style(LineStyle::Solid)
     }
@@ -297,6 +300,13 @@ impl CurveEditor {
                     }
                 }
             }
+
+            ui.add(
+                egui::Slider::new(&mut self.curve_resolution, 5..=500)
+                    .logarithmic(true)
+                    .text("Curve Resolution"),
+            );
+
             egui::reset_button(ui, self);
         });
 
@@ -394,15 +404,13 @@ impl CurveEditor {
                     response = response.on_hover_cursor(CursorIcon::Crosshair);
                 } else if hovered.1 == AnimationKeyPointField::Pos && ui.input(|i| i.modifiers.alt) {
                     response = response.on_hover_cursor(CursorIcon::NoDrop);
-                } else {
-                    // response = response.on_hover_cursor(CursorIcon::Grab);
                 }
             } else if ui.input(|i| i.modifiers.alt) {
                 response = response.on_hover_cursor(CursorIcon::Copy);
             }
 
             ui.label(format!(
-                "left click pos {:.2},{:.2}, delta: {:.2},{:.2}, ptr coord: {:.2},{:.2}",
+                "left click pos {:.2},{:.2}, delta: {:.5},{:.5}, ptr coord: {:.2},{:.2}",
                 left_click_pos.unwrap_or(Pos2::ZERO).x,
                 left_click_pos.unwrap_or(Pos2::ZERO).y,
                 drag_delta.x,
