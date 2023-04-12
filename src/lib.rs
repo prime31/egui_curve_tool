@@ -1,6 +1,5 @@
-#![warn(clippy::all, rust_2018_idioms)]
-
 mod app;
+mod hermite;
 pub use app::App;
 use egui_notify::Toasts;
 

@@ -3,6 +3,8 @@ use egui::*;
 use egui_notify::Toasts;
 use plot::{Corner, Line, LineStyle, Plot};
 
+use crate::hermite;
+
 const POINT_RADIUS: f32 = 5.0;
 const CONTROL_POINT_RADIUS: f32 = 3.0;
 const CIRCLE_CLICK_RADIUS: f32 = 0.03;
@@ -16,11 +18,11 @@ const CONTROL_POINT_LINE_COLOR: Color32 = Color32::LIGHT_GREEN;
 const HOVERED_KEY_STROKE_COLOR: Color32 = Color32::LIGHT_RED;
 
 #[derive(Default, PartialEq, Clone)]
-struct AnimationKey {
-    pos: Vec2,
-    tangent_in: Vec2,
-    tangent_out: Vec2,
-    tangent_locked: bool,
+pub struct AnimationKey {
+    pub pos: Vec2,
+    pub tangent_in: Vec2,
+    pub tangent_out: Vec2,
+    pub tangent_locked: bool,
 }
 
 impl AnimationKey {
@@ -206,7 +208,14 @@ impl CurveEditor {
     }
 
     fn draw_curve(&self) -> Line {
-        let pts: Vec<_> = self.points.iter().map(|f| [f.pos.x as f64, f.pos.y as f64]).collect();
+        let mut pts: Vec<_> = self.points.iter().map(|f| [f.pos.x as f64, f.pos.y as f64]).collect();
+        // Line::new(pts).color(CURVE_COLOR).style(LineStyle::Solid)
+
+        pts.clear();
+        for i in 0..=100 {
+            let t = i as f32 / 100.;
+            pts.push([t as f64, hermite::evaluate(&self.points, t) as f64]);
+        }
         Line::new(pts).color(CURVE_COLOR).style(LineStyle::Solid)
     }
 
@@ -364,9 +373,7 @@ impl CurveEditor {
             if let Some(dragged) = &self.dragged_object {
                 if dragged.1 == AnimationKeyPointField::Pos {
                     let y_min = if self.constrain_to_01 { 0. } else { -1. };
-                    self.points[dragged.0].pos = self.points[dragged.0]
-                        .pos
-                        .clamp(vec2(0., y_min), vec2(1., 1.));
+                    self.points[dragged.0].pos = self.points[dragged.0].pos.clamp(vec2(0., y_min), vec2(1., 1.));
                 }
                 self.dragged_object = None;
             }
