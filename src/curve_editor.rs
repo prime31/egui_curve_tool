@@ -73,13 +73,13 @@ impl AnimationKey {
             AnimationKeyPointField::TanIn => {
                 self.tangent_in += delta;
                 if self.tangent_locked {
-                    self.tangent_out = -self.tangent_in;
+                    self.tangent_out -= delta;
                 }
             }
             AnimationKeyPointField::TanOut => {
                 self.tangent_out += delta;
                 if self.tangent_locked {
-                    self.tangent_in = -self.tangent_out;
+                    self.tangent_in -= delta;
                 }
             }
         }
