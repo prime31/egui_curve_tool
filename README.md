@@ -1,4 +1,14 @@
-# eframe template
+# Curve Tool
+Simple hermite spline editor that works in the `0 - 1` or `-1 to -1` y range. Web based demo available [here](https://prime31.github.io/egui_curve_tool). The main purpose of the tool is to spit out code for use in shaders or CPU side (currently wip). The idea is you can choose to get an approximation of the spline via flattened lookup table (with configurable bias) or code for a full hermite solver. This should cover cases such as in shaders where you want to sacrifice some accuracy for speed as well as if you want the accuracy for CPU-side code that isn't running per pixel.
+
+
+# 
+# 
+# 
+
+
+
+## eframe template
 
 [![dependency status](https://deps.rs/repo/github/emilk/eframe_template/status.svg)](https://deps.rs/repo/github/emilk/eframe_template)
 [![Build Status](https://github.com/emilk/eframe_template/workflows/CI/badge.svg)](https://github.com/emilk/eframe_template/actions?workflow=CI)
@@ -9,7 +19,7 @@ The goal is for this to be the simplest way to get started writing a GUI app in 
 
 You can compile your app natively or for the web, and share it using Github Pages.
 
-## Getting started
+### Getting started
 
 Start by clicking "Use this template" at https://github.com/emilk/eframe_template/ or follow [these instructions](https://docs.github.com/en/free-pro-team@latest/github/creating-cloning-and-archiving-repositories/creating-a-repository-from-a-template).
 
