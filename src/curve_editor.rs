@@ -132,7 +132,7 @@ enum AnimationKeyPointField {
 #[derive(PartialEq)]
 pub struct CurveEditor {
     constrain_to_01: bool,
-    curve_resolution: usize,
+    curve_resolution: f32,
     dragged_object: Option<(usize, AnimationKeyPointField)>,
     hovered_object: Option<(usize, AnimationKeyPointField)>,
     right_click_pos: Option<Pos2>,
@@ -144,7 +144,7 @@ impl Default for CurveEditor {
     fn default() -> Self {
         Self {
             constrain_to_01: false,
-            curve_resolution: 50,
+            curve_resolution: 0.05,
             dragged_object: None,
             hovered_object: None,
             right_click_pos: None,
@@ -220,8 +220,15 @@ impl CurveEditor {
     }
 
     fn draw_curve(&self) -> Line {
-        let pts = splines::get_hermite(&self.points, self.curve_resolution);
+        let pts = splines::flatten(&self.points, Some(self.curve_resolution));
         Line::new(pts).color(CURVE_COLOR).style(LineStyle::Solid)
+    }
+
+    fn draw_curve_no_tolerance(&self) -> Line {
+        let orig_pts = splines::flatten(&self.points, None);
+        Line::new(orig_pts)
+            .color(Color32::from_rgba_premultiplied(0, 200, 0, 8))
+            .style(LineStyle::Solid)
     }
 
     fn draw_tangent_lines(&self, plot_ui: &mut PlotUi) {
@@ -304,9 +311,9 @@ impl CurveEditor {
             }
 
             ui.add(
-                egui::Slider::new(&mut self.curve_resolution, 5..=500)
+                egui::Slider::new(&mut self.curve_resolution, 0.0001..=0.1)
                     .logarithmic(true)
-                    .text("Curve Resolution"),
+                    .text("Curve Tolerance"),
             );
 
             egui::reset_button(ui, self);
@@ -337,6 +344,7 @@ impl CurveEditor {
         } = plot.show(ui, |plot_ui| {
             // draw the curve
             plot_ui.line(self.draw_curve());
+            plot_ui.line(self.draw_curve_no_tolerance());
             self.draw_tangent_lines(plot_ui);
 
             let y_min = if self.constrain_to_01 { 0. } else { -1. };

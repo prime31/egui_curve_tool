@@ -1,9 +1,10 @@
-use eframe::epaint::{CubicBezierShape, QuadraticBezierShape};
+use eframe::epaint::CubicBezierShape;
+
 use egui::{Color32, Stroke, Vec2};
 
 use crate::curve_editor::AnimationKey;
 
-pub fn get_hermite(points: &Vec<AnimationKey>, curve_resolution: usize) -> Vec<[f64; 2]> {
+pub fn get_bezier(points: &Vec<AnimationKey>, curve_resolution: usize) -> Vec<[f64; 2]> {
     let mut pts: Vec<[f64; 2]> = Vec::new();
 
     for i in 0..=curve_resolution {
@@ -82,18 +83,32 @@ pub fn evaluate_pair_bezier(pt1: &AnimationKey, pt2: &AnimationKey, time: f32) -
 
 /// find a set of points that approximate the quadratic Bézier curve. the number of points is determined by the tolerance.
 /// the points may not be evenly distributed in the range [0.0,1.0] (t value)
-pub fn flatten(points: &Vec<AnimationKey>, tolerance: Option<f32>) {
+pub fn flatten(points: &Vec<AnimationKey>, tolerance: Option<f32>) -> Vec<[f64; 2]> {
+    let mut flat_pts = vec![[points[0].pos.x as f64, points[0].pos.y as f64]];
+
     for chunk in points.windows(2) {
         let shape = CubicBezierShape {
             points: [
                 chunk[0].pos.to_pos2(),
-                chunk[0].pos.to_pos2(),
-                chunk[0].pos.to_pos2(),
-                chunk[0].pos.to_pos2(),
+                chunk[0].tangent_out_world().to_pos2(),
+                chunk[1].tangent_in_world().to_pos2(),
+                chunk[1].pos.to_pos2(),
             ],
             closed: false,
             fill: Color32::RED,
             stroke: Stroke::default(),
         };
+
+        flat_pts.extend(
+            shape
+                .flatten(tolerance)
+                .iter()
+                .skip(1)
+                .map(|pt| [pt.x as f64, pt.y as f64]),
+        );
     }
+
+    // TODO: de-dupe these
+
+    flat_pts
 }
