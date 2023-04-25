@@ -95,6 +95,14 @@ impl AnimationKey {
         }
         self.tangent_locked = !self.tangent_locked;
     }
+
+    pub fn tangent_in_world(&self) -> Vec2 {
+        self.pos + self.tangent_in
+    }
+
+    pub fn tangent_out_world(&self) -> Vec2 {
+        self.pos + self.tangent_out
+    }
 }
 
 impl Into<AnimationKeyPoint> for &AnimationKey {
@@ -212,13 +220,7 @@ impl CurveEditor {
     }
 
     fn draw_curve(&self) -> Line {
-        let mut pts: Vec<_> = self.points.iter().map(|f| [f.pos.x as f64, f.pos.y as f64]).collect();
-
-        pts.clear();
-        for i in 0..=self.curve_resolution {
-            let t = i as f32 / self.curve_resolution as f32;
-            pts.push([t as f64, splines::evaluate(&self.points, t) as f64]);
-        }
+        let pts = splines::get_hermite(&self.points, self.curve_resolution);
         Line::new(pts).color(CURVE_COLOR).style(LineStyle::Solid)
     }
 
