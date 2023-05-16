@@ -332,7 +332,7 @@ impl CurveEditor {
             .min_size(vec2(128., 128.))
             // .data_aspect(1.0)
             // .view_aspect(1.0)
-            .height(ui.available_height() - 151.); // magic number for 3 lines of logs on the bottom
+            .height(ui.available_height());
 
         if self.dragged_object.is_some() {
             plot = plot.coordinates_formatter(Corner::LeftBottom, CoordinatesFormatter::default());
@@ -340,7 +340,7 @@ impl CurveEditor {
 
         let InnerResponse {
             mut response,
-            inner: (left_click_pos, drag_delta, ptr_coord, _ptr_coord_screen, bounds),
+            inner: (left_click_pos, drag_delta, ptr_coord, _ptr_coord_screen, _bounds),
         } = plot.show(ui, |plot_ui| {
             // draw the curve
             plot_ui.line(self.draw_curve());
@@ -418,16 +418,6 @@ impl CurveEditor {
             } else if ui.input(|i| i.modifiers.alt) {
                 response = response.on_hover_cursor(CursorIcon::Copy);
             }
-
-            ui.label(format!(
-                "left click pos {:.2},{:.2}, delta: {:.5},{:.5}, ptr coord: {:.2},{:.2}",
-                left_click_pos.unwrap_or(Pos2::ZERO).x,
-                left_click_pos.unwrap_or(Pos2::ZERO).y,
-                drag_delta.x,
-                drag_delta.y,
-                ptr_coord.x,
-                ptr_coord.y
-            ));
         }
 
         // draw the keys
@@ -529,20 +519,6 @@ impl CurveEditor {
             }
         }
 
-        let largest_range = {
-            let x = bounds.max()[0] - bounds.min()[0];
-            let y = bounds.max()[1] - bounds.min()[1];
-            x.max(y)
-        };
-
-        ui.label(format!(
-            "plot bounds: min: {:.02?}, max: {:.02?}, largest_range: {:0.2?}, hovered: {:?}, right click: {:?}",
-            bounds.min(),
-            bounds.max(),
-            largest_range,
-            self.hovered_object,
-            self.right_click_pos
-        ));
         self.hovered_object = None;
         response
     }
